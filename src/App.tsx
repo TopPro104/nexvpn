@@ -12,7 +12,8 @@ import { StatsPage } from "./components/stats/StatsPage";
 import { ToastStack } from "./components/ui/Toast";
 import { useCallback, useRef, useEffect } from "react";
 import { StatusResponse, api } from "./api/tauri";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { onOpenUrl, getCurrent as getDeepLinkUrls } from "@tauri-apps/plugin-deep-link";
+import { listen } from "@tauri-apps/api/event";
 import { t } from "./i18n/translations";
 
 function AppContent() {
@@ -55,34 +56,53 @@ function AppContent() {
   }, [state.connected, state.settings.auto_reconnect, state.selectedServerId, dispatch, toast]);
 
   // Deep link handler: nexvpn://import/SUBSCRIPTION_URL
-  useEffect(() => {
-    const handleDeepLink = async (urls: string[]) => {
-      for (const raw of urls) {
-        // nexvpn://import/https://sub.example.com/abc
-        const match = raw.match(/^nexvpn:\/\/import\/(.+)$/i);
-        if (!match) continue;
-        const subUrl = decodeURIComponent(match[1]);
-        toast(`${t("toast.subAdded")}...`, "info");
-        try {
-          await api.addSubscription(subUrl);
-          const [servers, subs] = await Promise.all([
-            api.getServers(),
-            api.getSubscriptions(),
-          ]);
-          dispatch({ type: "SET_SERVERS", servers });
-          dispatch({ type: "SET_SUBSCRIPTIONS", subs });
-          dispatch({ type: "SET_PAGE", page: "subscriptions" });
-          toast(t("toast.subAdded"), "success");
-        } catch (e) {
-          toast(`${e}`, "error");
-        }
-      }
-    };
+  const processedUrls = useRef(new Set<string>());
 
-    let unlisten: (() => void) | undefined;
-    onOpenUrl(handleDeepLink).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+  const handleDeepLink = useCallback(async (raw: string) => {
+    // Deduplicate
+    if (processedUrls.current.has(raw)) return;
+    processedUrls.current.add(raw);
+
+    const match = raw.match(/^nexvpn:\/\/import\/(.+)$/i);
+    if (!match) return;
+    const subUrl = decodeURIComponent(match[1]);
+    toast(`${t("toast.subAdded")}...`, "info");
+    try {
+      await api.addSubscription(subUrl);
+      const [servers, subs] = await Promise.all([
+        api.getServers(),
+        api.getSubscriptions(),
+      ]);
+      dispatch({ type: "SET_SERVERS", servers });
+      dispatch({ type: "SET_SUBSCRIPTIONS", subs });
+      dispatch({ type: "SET_PAGE", page: "subscriptions" });
+      toast(t("toast.subAdded"), "success");
+    } catch (e) {
+      toast(`${e}`, "error");
+    }
   }, [dispatch, toast]);
+
+  useEffect(() => {
+    // 1. Check URLs that launched the app
+    getDeepLinkUrls()
+      .then((urls) => urls?.forEach((u) => handleDeepLink(u)))
+      .catch(() => {});
+
+    // 2. Listen for deep-link plugin events (app already running)
+    let unlistenOpen: (() => void) | undefined;
+    onOpenUrl((urls) => urls.forEach((u) => handleDeepLink(u)))
+      .then((fn) => { unlistenOpen = fn; });
+
+    // 3. Listen for single-instance forwarded URLs
+    let unlistenSingle: (() => void) | undefined;
+    listen<string>("deep-link-received", (e) => handleDeepLink(e.payload))
+      .then((fn) => { unlistenSingle = fn; });
+
+    return () => {
+      unlistenOpen?.();
+      unlistenSingle?.();
+    };
+  }, [handleDeepLink]);
 
   const renderPage = () => {
     switch (state.page) {

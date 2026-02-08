@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod commands;
 mod core;
@@ -38,6 +38,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // When a second instance is launched (e.g. via deep link),
+            // forward the URL to the existing window
+            if let Some(url) = args.into_iter().find(|a| a.starts_with("nexvpn://")) {
+                let _ = app.emit("deep-link-received", url);
+            }
+            // Focus existing window
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+        }))
         .manage(app_context)
         .setup(move |app| {
             let resource_dir = app

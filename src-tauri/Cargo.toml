@@ -1,6 +1,6 @@
 [package]
 name = "nexvpn"
-version = "1.0.0"
+version = "1.0.1"
 description = "Open-source VPN client with multi-protocol support"
 authors = ["HorusVPN"]
 edition = "2021"
@@ -25,3 +25,4 @@ anyhow = "1"
 dirs = "5"
 winreg = "0.52"
 tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
