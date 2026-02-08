@@ -129,4 +129,6 @@ export const api = {
     invoke<void>("clear_connection_history"),
 
   getDeviceInfo: () => invoke<DeviceInfo>("get_device_info"),
+
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
 };

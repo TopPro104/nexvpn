@@ -5,6 +5,9 @@ use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::Mutex;
 
+#[cfg(target_os = "android")]
+use std::os::unix::fs::PermissionsExt;
+
 use crate::proxy::models::*;
 
 use super::{singbox, xray};
@@ -20,11 +23,57 @@ pub struct CoreManager {
 }
 
 impl CoreManager {
-    pub fn new() -> Self {
-        let data_dir = dirs::data_dir()
+    #[cfg(target_os = "android")]
+    fn read_android_paths() -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        // Try multiple possible locations for the paths file
+        for base in &[
+            "/data/data/com.horusvpn.nexvpn/files",
+            "/data/user/0/com.horusvpn.nexvpn/files",
+        ] {
+            let path = PathBuf::from(base).join(".android_paths");
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                for line in content.lines() {
+                    if let Some((k, v)) = line.split_once('=') {
+                        map.insert(k.trim().to_string(), v.trim().to_string());
+                    }
+                }
+                if !map.is_empty() {
+                    log::info!("Read android paths from {}: {:?}", path.display(), map);
+                    return map;
+                }
+            }
+        }
+        log::warn!("Could not read .android_paths file");
+        map
+    }
+
+    fn resolve_data_dir() -> PathBuf {
+        // Android: use app-private storage
+        #[cfg(target_os = "android")]
+        {
+            // Try known Android app data paths
+            for base in &[
+                "/data/user/0/com.horusvpn.nexvpn/files",
+                "/data/data/com.horusvpn.nexvpn/files",
+            ] {
+                let dir = PathBuf::from(base).join("nexvpn");
+                if std::fs::create_dir_all(&dir).is_ok() {
+                    return dir;
+                }
+            }
+        }
+
+        // Desktop: use standard data dir
+        dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("nexvpn");
+            .join("nexvpn")
+    }
+
+    pub fn new() -> Self {
+        let data_dir = Self::resolve_data_dir();
         std::fs::create_dir_all(&data_dir).ok();
+        log::info!("CoreManager data_dir: {:?} (exists={})", data_dir, data_dir.exists());
 
         Self {
             process: Arc::new(Mutex::new(None)),
@@ -69,6 +118,9 @@ impl CoreManager {
         let socks_port = *self.socks_port.lock().await;
         let http_port = *self.http_port.lock().await;
 
+        // On desktop, TUN is only supported by sing-box (xray has no TUN inbound).
+        // On Android, TUN is handled by VpnService + tun2socks, so both cores work.
+        #[cfg(not(target_os = "android"))]
         if tun_mode && core_type == CoreType::Xray {
             return Err(anyhow!("TUN mode requires sing-box. Switch core to sing-box in settings."));
         }
@@ -79,7 +131,11 @@ impl CoreManager {
         };
 
         let config_path = self.config_dir.join("running_config.json");
-        std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)
+            .map_err(|e| anyhow!("Cannot write config to {}: {}", config_path.display(), e))?;
 
         log::info!(
             "Starting {:?}{} for '{}' ({}:{})",
@@ -88,6 +144,65 @@ impl CoreManager {
         );
 
         let bin_path = self.resolve_binary(&core_type).await?;
+
+        // On Android: diagnose binary before spawning
+        #[cfg(target_os = "android")]
+        {
+            let meta = std::fs::metadata(&bin_path);
+            let exists = bin_path.exists();
+            let permissions = meta.as_ref().map(|m| format!("{:o}", m.permissions().mode())).unwrap_or_else(|e| format!("err: {}", e));
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+
+            log::info!(
+                "Android binary check: path={}, exists={}, size={}, perms={}",
+                bin_path.display(), exists, size, permissions
+            );
+
+            // Ensure executable
+            let chmod = std::process::Command::new("chmod")
+                .args(["755", &bin_path.to_string_lossy()])
+                .output();
+            log::info!("chmod result: {:?}", chmod.map(|o| o.status));
+
+            // Quick test: can we run --version?
+            let test = std::process::Command::new(&bin_path)
+                .arg("version")
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output();
+            match &test {
+                Ok(o) => log::info!(
+                    "Binary test: status={}, stdout={}, stderr={}",
+                    o.status,
+                    String::from_utf8_lossy(&o.stdout).chars().take(200).collect::<String>(),
+                    String::from_utf8_lossy(&o.stderr).chars().take(200).collect::<String>()
+                ),
+                Err(e) => log::error!("Binary test FAILED: {} (kind={:?})", e, e.kind()),
+            }
+
+            // If test failed, return detailed error
+            if let Err(e) = &test {
+                // Also try to read ELF header
+                let header = std::fs::read(&bin_path)
+                    .map(|bytes| {
+                        if bytes.len() > 4 && &bytes[0..4] == b"\x7fELF" {
+                            format!("Valid ELF, {} bytes", bytes.len())
+                        } else {
+                            format!("NOT ELF! First bytes: {:02x?}", &bytes[..bytes.len().min(16)])
+                        }
+                    })
+                    .unwrap_or_else(|re| format!("cannot read: {}", re));
+
+                return Err(anyhow!(
+                    "Cannot execute {}: {} (kind={:?})\nPath: {}\nSize: {} bytes, Perms: {}\nELF: {}",
+                    bin_path.file_name().unwrap_or_default().to_string_lossy(),
+                    e, e.kind(),
+                    bin_path.display(),
+                    size, permissions,
+                    header
+                ));
+            }
+        }
 
         // Clear logs from previous session
         self.logs.lock().await.clear();
@@ -124,15 +239,26 @@ impl CoreManager {
                 .is_ok()
             {
                 log::info!("Core started in ~{}ms  SOCKS :{}", delays[..=attempt].iter().sum::<u64>(), socks_port);
+                // Signal Android VPN service to start
+                #[cfg(target_os = "android")]
+                self.signal_android_vpn(&format!("start:{}", socks_port));
                 return Ok(());
             }
         }
+
+        // Even if health check didn't confirm, signal VPN (core may still be starting)
+        #[cfg(target_os = "android")]
+        self.signal_android_vpn(&format!("start:{}", socks_port));
 
         log::warn!("SOCKS port not open after health check — core may still be starting");
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
+        // Signal Android VPN service to stop first
+        #[cfg(target_os = "android")]
+        self.signal_android_vpn("stop");
+
         if let Some(mut child) = self.process.lock().await.take() {
             log::info!("Stopping core process");
             child.kill().await.ok();
@@ -151,6 +277,25 @@ impl CoreManager {
             }
         } else {
             false
+        }
+    }
+
+    // ── Android VPN signaling ──────────────────────────
+    #[cfg(target_os = "android")]
+    fn signal_android_vpn(&self, command: &str) {
+        let android_paths = Self::read_android_paths();
+        let base_dir = android_paths
+            .get("files_dir")
+            .map(|s| PathBuf::from(s))
+            .unwrap_or_else(|| self.config_dir.clone());
+
+        let cmd_path = base_dir.join("nexvpn/.vpn_command");
+        if let Some(parent) = cmd_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        match std::fs::write(&cmd_path, command) {
+            Ok(_) => log::info!("VPN signal '{}' written to {}", command, cmd_path.display()),
+            Err(e) => log::error!("Failed to write VPN signal: {}", e),
         }
     }
 
@@ -284,25 +429,91 @@ impl CoreManager {
             CoreType::SingBox => "sing-box",
             CoreType::Xray => "xray",
         };
-        let exe_ext = if cfg!(windows) { ".exe" } else { "" };
 
-        // 1) Tauri sidecar dir
-        if let Some(dir) = self.sidecar_dir.lock().await.as_ref() {
-            let p = dir.join(format!("{}{}", name, exe_ext));
-            if p.exists() { return Ok(p); }
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let fname = entry.file_name().to_string_lossy().to_string();
-                    if fname.starts_with(name) && entry.path().is_file() {
-                        return Ok(entry.path());
-                    }
+        // Android: binaries are packed as .so in jniLibs, find them in native lib dir
+        #[cfg(target_os = "android")]
+        {
+            let so_name = match core_type {
+                CoreType::SingBox => "libsingbox.so",
+                CoreType::Xray => "libxray.so",
+            };
+
+            let mut searched = Vec::new();
+
+            // Read real native lib dir from file written by MainActivity.kt
+            let android_paths = Self::read_android_paths();
+            let native_lib_dir = android_paths.get("native_lib_dir").cloned();
+            let files_dir = android_paths.get("files_dir").cloned();
+
+            // 1) Real native lib dir from Android context
+            if let Some(ref lib_dir) = native_lib_dir {
+                let p = PathBuf::from(lib_dir).join(so_name);
+                searched.push(p.display().to_string());
+                if p.exists() {
+                    let _ = std::process::Command::new("chmod").args(["755", &p.to_string_lossy()]).output();
+                    log::info!("Found {} at {}", so_name, p.display());
+                    return Ok(p);
                 }
             }
+
+            // 2) Common Android paths
+            for base in &[
+                "/data/data/com.horusvpn.nexvpn/lib",
+                "/data/user/0/com.horusvpn.nexvpn/lib",
+            ] {
+                let p = PathBuf::from(base).join(so_name);
+                searched.push(p.display().to_string());
+                if p.exists() {
+                    let _ = std::process::Command::new("chmod").args(["755", &p.to_string_lossy()]).output();
+                    return Ok(p);
+                }
+            }
+
+            // 3) Check sidecar_dir
+            if let Some(dir) = self.sidecar_dir.lock().await.as_ref() {
+                let p = dir.join(so_name);
+                searched.push(p.display().to_string());
+                if p.exists() {
+                    let _ = std::process::Command::new("chmod").args(["755", &p.to_string_lossy()]).output();
+                    return Ok(p);
+                }
+            }
+
+            // 4) config_dir/bin/
+            let p = self.config_dir.join("bin").join(so_name);
+            searched.push(p.display().to_string());
+            if p.exists() {
+                let _ = std::process::Command::new("chmod").args(["755", &p.to_string_lossy()]).output();
+                return Ok(p);
+            }
+
+            // Debug: list native lib dir contents
+            let lib_dir_path = native_lib_dir.as_deref().unwrap_or("/data/data/com.horusvpn.nexvpn/lib");
+            let lib_contents = std::fs::read_dir(lib_dir_path)
+                .map(|entries| {
+                    entries.flatten()
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_else(|e| format!("cannot read: {}", e));
+
+            return Err(anyhow!(
+                "Core '{}' ({}) not found.\nNativeLibDir: {}\nSearched: {}\nLibDir contents: [{}]",
+                name, so_name,
+                native_lib_dir.as_deref().unwrap_or("(unknown)"),
+                searched.join(", "),
+                lib_contents
+            ));
         }
 
-        // 2) Next to exe
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
+        // Desktop platforms
+        #[cfg(not(target_os = "android"))]
+        {
+            let exe_ext = if cfg!(windows) { ".exe" } else { "" };
+
+            // 1) Tauri sidecar dir
+            if let Some(dir) = self.sidecar_dir.lock().await.as_ref() {
                 let p = dir.join(format!("{}{}", name, exe_ext));
                 if p.exists() { return Ok(p); }
                 if let Ok(entries) = std::fs::read_dir(dir) {
@@ -314,30 +525,46 @@ impl CoreManager {
                     }
                 }
             }
-        }
 
-        // 3) Data dir
-        let p = self.config_dir.join("bin").join(format!("{}{}", name, exe_ext));
-        if p.exists() { return Ok(p); }
-
-        // 4) PATH
-        let which = if cfg!(windows) { "where" } else { "which" };
-        if let Ok(out) = std::process::Command::new(which).arg(name).output() {
-            if out.status.success() {
-                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if let Some(first) = s.lines().next() {
-                    let p = PathBuf::from(first);
+            // 2) Next to exe
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let p = dir.join(format!("{}{}", name, exe_ext));
                     if p.exists() { return Ok(p); }
+                    if let Ok(entries) = std::fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let fname = entry.file_name().to_string_lossy().to_string();
+                            if fname.starts_with(name) && entry.path().is_file() {
+                                return Ok(entry.path());
+                            }
+                        }
+                    }
                 }
             }
-        }
 
-        Err(anyhow!(
-            "Core binary '{}' not found. Place it next to NexVPN.exe or in PATH.\n\
-             Download: sing-box → github.com/SagerNet/sing-box/releases\n\
-             Download: xray → github.com/XTLS/Xray-core/releases",
-            name
-        ))
+            // 3) Data dir
+            let p = self.config_dir.join("bin").join(format!("{}{}", name, exe_ext));
+            if p.exists() { return Ok(p); }
+
+            // 4) PATH
+            let which = if cfg!(windows) { "where" } else { "which" };
+            if let Ok(out) = std::process::Command::new(which).arg(name).output() {
+                if out.status.success() {
+                    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if let Some(first) = s.lines().next() {
+                        let p = PathBuf::from(first);
+                        if p.exists() { return Ok(p); }
+                    }
+                }
+            }
+
+            Err(anyhow!(
+                "Core binary '{}' not found. Place it next to NexVPN.exe or in PATH.\n\
+                 Download: sing-box → github.com/SagerNet/sing-box/releases\n\
+                 Download: xray → github.com/XTLS/Xray-core/releases",
+                name
+            ))
+        }
     }
 }
 

@@ -3,6 +3,7 @@ import { useApp } from "../../context/AppContext";
 import { api } from "../../api/tauri";
 import { Spinner } from "../ui/Spinner";
 import { t } from "../../i18n/translations";
+import { PowerIcon } from "../ui/Icons";
 
 export function StatusPanel() {
   const { state, dispatch, toast } = useApp();
@@ -72,7 +73,7 @@ export function StatusPanel() {
             <Spinner size={32} />
           ) : (
             <span className="connect-btn-icon">
-              {state.connected ? "\u23F8" : "\u25B6"}
+              <PowerIcon size={40} />
             </span>
           )}
         </div>

@@ -4,6 +4,14 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 
 **[Russian version / Русская версия](README_RU.md)**
 
+## Screenshots
+
+### Desktop
+![Desktop](desktop.jpg)
+
+### Mobile
+![Mobile](phone.jpg)
+
 ## Features
 
 - **Multi-protocol** — VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC
@@ -22,7 +30,7 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 
 ## Download
 
-Pre-built installers for Windows (x64) are available on the [Releases](../../releases) page.
+Pre-built installers for Windows (x64) and Android (APK) are available on the [Releases](../../releases) page.
 
 ## Building from source
 

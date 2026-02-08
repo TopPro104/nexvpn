@@ -22,7 +22,13 @@
     },
     "shell:allow-spawn",
     "shell:allow-stdin-write",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" }
+      ]
+    },
     "deep-link:default"
   ]
 }

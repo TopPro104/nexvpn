@@ -1843,3 +1843,249 @@ input[type="number"] {
 .anim-energetic .settings-section:nth-child(4) { animation-delay: 0.15s; }
 .anim-energetic .settings-section:nth-child(5) { animation-delay: 0.2s; }
 .anim-energetic .settings-section:nth-child(n+6) { animation-delay: 0.25s; }
+
+/* ══════════════════════════════════════════════
+   MOBILE RESPONSIVE
+   ══════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  /* Layout: vertical, bottom nav */
+  .app-layout {
+    flex-direction: column-reverse;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Sidebar → bottom tab bar */
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding: 0;
+    flex-shrink: 0;
+    /* safe area for phones with gesture bar */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .sidebar-brand,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    padding: 0;
+    gap: 0;
+    flex: 1;
+  }
+
+  .nav-item {
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 4px 6px;
+    font-size: 10px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0;
+    min-height: 48px;
+  }
+
+  .nav-icon {
+    font-size: 18px;
+    width: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-label {
+    font-size: 10px;
+  }
+
+  .nav-item.active {
+    background: var(--bg-hover);
+    color: var(--accent);
+    border-radius: 0;
+  }
+
+  /* Main content — safe area for notch/dynamic island */
+  .main-content {
+    padding: 16px;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+    flex: 1;
+    min-height: 0;
+  }
+
+  .home-page {
+    gap: 12px;
+    max-width: 100%;
+  }
+
+  /* ── Hero status panel: centered column layout ── */
+  .status-panel {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 20px 16px;
+    gap: 16px;
+    background: transparent;
+    border: none;
+  }
+
+  .status-info {
+    align-items: center;
+    order: -1;
+  }
+
+  .status-label {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .status-core {
+    display: none;
+  }
+
+  /* ── Hero connect button: large centered ── */
+  .connect-btn {
+    width: 120px;
+    height: 120px;
+    border-width: 3px;
+  }
+
+  .connect-btn-icon {
+    font-size: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Ripple/glow effect on tap */
+  .connect-btn:active:not(:disabled) {
+    transform: scale(0.95);
+    box-shadow: 0 0 40px var(--accent-glow);
+  }
+
+  .connect-btn.connected:active:not(:disabled) {
+    box-shadow: 0 0 40px rgba(68, 255, 136, 0.4);
+  }
+
+  /* Traffic panel */
+  .traffic-panel {
+    padding: 12px 16px;
+  }
+
+  .traffic-divider {
+    margin: 0 12px;
+  }
+
+  .traffic-speed {
+    font-size: 14px;
+  }
+
+  /* Server list */
+  .server-list-header {
+    gap: 8px;
+  }
+
+  .search-input {
+    min-width: 0;
+    font-size: 14px;
+  }
+
+  .server-list-items {
+    max-height: calc(100vh - 480px);
+    max-height: calc(100dvh - 480px);
+  }
+
+  .server-card {
+    padding: 12px 14px;
+    min-height: 48px;
+  }
+
+  .server-delete {
+    opacity: 0.6;
+  }
+
+  /* Subscriptions */
+  .sub-page {
+    max-width: 100%;
+  }
+
+  .sub-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .sub-url {
+    max-width: 100%;
+  }
+
+  .sub-actions {
+    width: 100%;
+  }
+
+  .sub-actions .btn {
+    flex: 1;
+  }
+
+  /* Settings */
+  .settings-page {
+    max-width: 100%;
+  }
+
+  .theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .core-radio-group {
+    flex-direction: column;
+  }
+
+  .port-inputs {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .form-input.small {
+    width: 100%;
+  }
+
+  /* Stats */
+  .stats-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .history-header,
+  .history-row {
+    grid-template-columns: 2fr 1fr 1.5fr;
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  /* Hide 4th column (traffic) on mobile */
+  .history-header > *:nth-child(4),
+  .history-row > *:nth-child(4) {
+    display: none;
+  }
+
+  /* Modal */
+  .modal-content {
+    min-width: unset;
+    max-width: calc(100vw - 32px);
+    margin: 16px;
+  }
+
+  /* Toast */
+  .toast-stack {
+    left: 16px;
+    right: 16px;
+    bottom: 72px;
+    max-width: unset;
+  }
+}

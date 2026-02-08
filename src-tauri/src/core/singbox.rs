@@ -7,10 +7,9 @@ use crate::proxy::models::*;
 pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool) -> Result<Value> {
     let outbound = build_outbound(server)?;
 
-    // sing-box 1.12+ config format:
-    // - DNS servers use "type" field
-    // - No block/dns outbounds — use rule actions (sniff, hijack-dns)
-    // - default_domain_resolver replaces outbound DNS rules
+    // On Android, TUN requires VpnService — force disable
+    let tun_mode = if cfg!(target_os = "android") { false } else { tun_mode };
+
     let mut inbounds = vec![
         json!({
             "type": "socks",
@@ -35,17 +34,41 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
                 "fdfe:dcba:9876::1/126"
             ],
             "auto_route": true,
-            "strict_route": true,
-            "stack": "mixed"
+            "strict_route": false,
+            "stack": "mixed",
+            "endpoint_independent_nat": true
         }));
     }
 
-    let config = json!({
-        "log": {
-            "level": "warn",
-            "timestamp": true
-        },
-        "dns": {
+    // DNS config: TUN mode needs DoH + proper resolver chain to avoid loops
+    // sing-box 1.12+ new DNS format: use type/server instead of address
+    let dns = if tun_mode {
+        json!({
+            "servers": [
+                {
+                    "tag": "dns-remote",
+                    "type": "https",
+                    "server": "dns.google",
+                    "server_port": 443,
+                    "domain_resolver": "dns-direct",
+                    "detour": "proxy"
+                },
+                {
+                    "tag": "dns-direct",
+                    "type": "udp",
+                    "server": "8.8.8.8",
+                    "server_port": 53
+                }
+            ],
+            "rules": [
+                { "query_type": [28, 32, 33], "action": "reject" },
+                { "domain_suffix": [".lan"], "action": "reject" }
+            ],
+            "final": "dns-remote",
+            "independent_cache": true
+        })
+    } else {
+        json!({
             "servers": [
                 {
                     "tag": "dns-local",
@@ -58,7 +81,38 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
                 }
             ],
             "final": "dns-remote"
+        })
+    };
+
+    // Route rules (sniff + DNS hijack, same approach as NekoRay)
+    let mut route_rules: Vec<Value> = vec![
+        json!({ "action": "sniff" }),
+        json!({ "protocol": "dns", "action": "hijack-dns" }),
+    ];
+
+    if tun_mode {
+        // Block multicast, NetBIOS, mDNS — they shouldn't go through proxy
+        route_rules.push(json!({
+            "network": "udp",
+            "port": [135, 137, 138, 139, 5353],
+            "action": "reject"
+        }));
+        route_rules.push(json!({
+            "ip_cidr": ["224.0.0.0/3", "ff00::/8"],
+            "action": "reject"
+        }));
+        route_rules.push(json!({
+            "source_ip_cidr": ["224.0.0.0/3", "ff00::/8"],
+            "action": "reject"
+        }));
+    }
+
+    let config = json!({
+        "log": {
+            "level": if cfg!(target_os = "android") { "info" } else { "warn" },
+            "timestamp": true
         },
+        "dns": dns,
         "inbounds": inbounds,
         "outbounds": [
             outbound,
@@ -68,19 +122,11 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
             }
         ],
         "route": {
-            "rules": [
-                {
-                    "action": "sniff"
-                },
-                {
-                    "protocol": "dns",
-                    "action": "hijack-dns"
-                }
-            ],
+            "rules": route_rules,
             "final": "proxy",
-            "auto_detect_interface": true,
+            "auto_detect_interface": !cfg!(target_os = "android"),
             "default_domain_resolver": {
-                "server": "dns-local"
+                "server": if cfg!(target_os = "android") { "dns-remote" } else if tun_mode { "dns-direct" } else { "dns-local" }
             }
         },
         "experimental": {
@@ -98,6 +144,7 @@ fn build_outbound(server: &Server) -> Result<Value> {
         "tag": "proxy",
         "server": server.address,
         "server_port": server.port,
+        "udp_fragment": true,
     });
 
     match server.protocol {

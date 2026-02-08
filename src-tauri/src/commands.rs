@@ -590,13 +590,65 @@ pub fn get_device_info() -> hwid::DeviceInfo {
     hwid::get_device_info()
 }
 
+/// Open a URL in the system browser
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // Write URL to file for MainActivity to pick up via intent
+        for base in &[
+            "/data/data/com.horusvpn.nexvpn/files",
+            "/data/user/0/com.horusvpn.nexvpn/files",
+        ] {
+            let path = std::path::PathBuf::from(base).join("nexvpn/.open_url");
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            if std::fs::write(&path, &url).is_ok() {
+                log::info!("open_url: wrote {} to {}", url, path.display());
+                return Ok(());
+            }
+        }
+        Err("Failed to write URL file".into())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        // Desktop: use std::process::Command to open URL
+        #[cfg(target_os = "windows")]
+        { std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn().map_err(|e| e.to_string())?; }
+        #[cfg(target_os = "macos")]
+        { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+        #[cfg(target_os = "linux")]
+        { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+        Ok(())
+    }
+}
+
 // ── Persistence ────────────────────────────────────────
 
 fn state_path() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("nexvpn")
-        .join("state.json")
+    #[cfg(target_os = "android")]
+    {
+        for base in &[
+            "/data/user/0/com.horusvpn.nexvpn/files",
+            "/data/data/com.horusvpn.nexvpn/files",
+        ] {
+            let dir = std::path::PathBuf::from(base).join("nexvpn");
+            if std::fs::create_dir_all(&dir).is_ok() {
+                return dir.join("state.json");
+            }
+        }
+        return std::path::PathBuf::from("/data/data/com.horusvpn.nexvpn/files/nexvpn/state.json");
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("nexvpn")
+            .join("state.json")
+    }
 }
 
 pub fn load_state() -> AppState {

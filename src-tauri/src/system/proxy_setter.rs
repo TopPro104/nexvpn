@@ -11,6 +11,10 @@ pub fn set_system_proxy(host: &str, port: u16) -> Result<()> {
     #[cfg(target_os = "macos")]
     macos::set_proxy(host, port)?;
 
+    // Android: no-op — VPN uses TUN, not system proxy
+    #[cfg(target_os = "android")]
+    { let _ = (host, port); }
+
     Ok(())
 }
 
@@ -25,6 +29,7 @@ pub fn unset_system_proxy() -> Result<()> {
     #[cfg(target_os = "macos")]
     macos::unset_proxy()?;
 
+    // Android: no-op
     Ok(())
 }
 

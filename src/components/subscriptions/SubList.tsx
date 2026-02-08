@@ -5,7 +5,6 @@ import { Button } from "../ui/Button";
 import { Spinner } from "../ui/Spinner";
 import { AddSubModal } from "./AddSubModal";
 import { t } from "../../i18n/translations";
-import { open } from "@tauri-apps/plugin-shell";
 
 function formatDate(ts: number | null): string {
   if (!ts) return t("subs.never");
@@ -60,7 +59,7 @@ export function SubList() {
         <div style={{ display: "flex", gap: 8 }}>
           <Button
             variant="secondary"
-            onClick={() => open("https://t.me/vpnhorbot")}
+            onClick={() => api.openUrl("https://t.me/vpnhorbot")}
           >
             {t("subs.reliableSource")}
           </Button>
