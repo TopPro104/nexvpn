@@ -1,4 +1,5 @@
 # NexVPN
+![NexVPN Main Screen](desktop.jpg)
 
 VPN-клиент с открытым исходным кодом на Tauri, React и Rust. Поддержка множества прокси-протоколов через движки **sing-box** и **Xray-core**.
 

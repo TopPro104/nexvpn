@@ -1,5 +1,5 @@
 # NexVPN
-
+![NexVPN Main Screen](desktop.jpg)
 Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy protocols via **sing-box** and **Xray-core** engines.
 
 **[Russian version / Русская версия](README_RU.md)**
