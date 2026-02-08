@@ -10,7 +10,7 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 ![Desktop](desktop.jpg)
 
 ### Mobile
-![Mobile](phone.jpg)
+<img src="phone.jpg" width="300" alt="Mobile" />
 
 ## Features
 
