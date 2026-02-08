@@ -37,6 +37,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(app_context)
         .setup(move |app| {
             let resource_dir = app

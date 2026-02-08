@@ -26,6 +26,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["nexvpn"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "icon": [
