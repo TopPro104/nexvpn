@@ -6,11 +6,14 @@ VPN-клиент с открытым исходным кодом на Tauri, Rea
 
 ## Скриншоты
 
-### Десктоп
-![Десктоп](desktop.jpg)
+### Windows
+![Windows](desktop.jpg)
 
-### Мобильное приложение
-<img src="phone.jpg" width="300" alt="Мобильное приложение" />
+### macOS
+![macOS](macos.jpg)
+
+### Android
+<img src="phone.jpg" width="300" alt="Android" />
 
 ## Возможности
 

@@ -6,11 +6,14 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 
 ## Screenshots
 
-### Desktop
-![Desktop](desktop.jpg)
+### Windows
+![Windows](desktop.jpg)
 
-### Mobile
-<img src="phone.jpg" width="300" alt="Mobile" />
+### macOS
+![macOS](macos.jpg)
+
+### Android
+<img src="phone.jpg" width="300" alt="Android" />
 
 ## Features
 
