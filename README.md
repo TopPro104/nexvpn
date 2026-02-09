@@ -21,6 +21,8 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **Dual core** — switch between sing-box and Xray-core in one click
 - **Subscriptions** — import and auto-update subscription URLs
 - **Link import** — paste `vless://`, `vmess://`, `ss://`, `trojan://` links directly
+- **Routing rules** — domain-based rules (proxy / direct / block) with quick presets for ads blocking and regional bypass
+- **Split tunneling** — choose default route: proxy all traffic or only selected domains (Direct All mode)
 - **System Proxy & TUN mode** — system HTTP proxy or full TUN VPN (captures all traffic)
 - **TCP ping** — single and bulk server latency testing, auto-select best server
 - **Themes** — 4 color themes (Dark, Light, Midnight, Cyber)
