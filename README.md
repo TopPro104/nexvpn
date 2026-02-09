@@ -20,13 +20,13 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **Link import** — paste `vless://`, `vmess://`, `ss://`, `trojan://` links directly
 - **System Proxy & TUN mode** — system HTTP proxy or full TUN VPN (captures all traffic)
 - **TCP ping** — single and bulk server latency testing, auto-select best server
-- **Themes** — 8 color themes (dark, light, nord, dracula, monokai, solarized, gruvbox, catppuccin)
+- **Themes** — 4 color themes (Dark, Light, Midnight, Cyber)
 - **Styles** — Default, Modern Minimal, Glassmorphism, Neon Glow
 - **Animations** — None, Smooth, Energetic (configurable, CSS-only)
 - **Statistics** — connection history, traffic totals, live speed graph
 - **i18n** — English and Russian
 - **HWID** — optional device fingerprint for panel-based subscriptions
-- **Lightweight** — single binary, no Electron, ~5 MB app size
+- **Lightweight** — single binary, no Electron, ~16 MB app size
 
 ## Download
 
