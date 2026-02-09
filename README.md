@@ -26,11 +26,12 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **Statistics** — connection history, traffic totals, live speed graph
 - **i18n** — English and Russian
 - **HWID** — optional device fingerprint for panel-based subscriptions
+- **Cross-platform** — Windows, macOS, Android from a single codebase
 - **Lightweight** — single binary, no Electron, ~16 MB app size
 
 ## Download
 
-Pre-built installers for Windows (x64) and Android (APK) are available on the [Releases](../../releases) page.
+Pre-built installers for Windows (x64), macOS (Apple Silicon) and Android (APK) are available on the [Releases](../../releases) page.
 
 ## Building from source
 
