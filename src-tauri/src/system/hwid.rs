@@ -104,9 +104,52 @@ fn read_android_prop(name: &str) -> Option<String> {
         })
 }
 
-// ── Linux / macOS fallback ───────────────────────────
+// ── macOS ────────────────────────────────────────────
 
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(target_os = "macos")]
+pub fn get_device_info() -> DeviceInfo {
+    use std::process::Command;
+
+    let hwid = Command::new("ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            text.lines()
+                .find(|l| l.contains("IOPlatformUUID"))
+                .and_then(|l| l.split('"').nth(3))
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let os_version = Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let model = Command::new("sysctl")
+        .arg("-n")
+        .arg("hw.model")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "Mac".to_string());
+
+    DeviceInfo {
+        hwid,
+        platform: "macOS".to_string(),
+        os_version,
+        model,
+        user_agent: "NexVPN/1.0".to_string(),
+    }
+}
+
+// ── Linux fallback ──────────────────────────────────
+
+#[cfg(target_os = "linux")]
 pub fn get_device_info() -> DeviceInfo {
     let hwid = std::fs::read_to_string("/etc/machine-id")
         .or_else(|_| std::fs::read_to_string("/var/lib/dbus/machine-id"))
@@ -116,7 +159,7 @@ pub fn get_device_info() -> DeviceInfo {
 
     DeviceInfo {
         hwid,
-        platform: std::env::consts::OS.to_string(),
+        platform: "Linux".to_string(),
         os_version: "Unknown".to_string(),
         model: "Desktop".to_string(),
         user_agent: "NexVPN/1.0".to_string(),
