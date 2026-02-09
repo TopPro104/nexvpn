@@ -725,9 +725,11 @@ pub async fn complete_onboarding(ctx: State<'_, AppContext>) -> Result<(), Strin
 pub fn is_admin() -> bool {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         // Check via "net session" — only succeeds when running as admin
         std::process::Command::new("net")
             .args(["session"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()

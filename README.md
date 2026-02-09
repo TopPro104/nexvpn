@@ -24,6 +24,8 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **Routing rules** — domain-based rules (proxy / direct / block) with quick presets for ads blocking and regional bypass
 - **Split tunneling** — choose default route: proxy all traffic or only selected domains (Direct All mode)
 - **System Proxy & TUN mode** — system HTTP proxy or full TUN VPN (captures all traffic)
+- **Admin elevation** — one-click "Run as Administrator" button for TUN mode (Windows UAC / macOS sudo prompt)
+- **Onboarding** — interactive guided tour for first-time users with language selection
 - **TCP ping** — single and bulk server latency testing, auto-select best server
 - **Themes** — 4 color themes (Dark, Light, Midnight, Cyber)
 - **Styles** — Default, Modern Minimal, Glassmorphism, Neon Glow
@@ -122,6 +124,19 @@ nexvpn/
 ├── LICENSE
 └── README.md
 ```
+
+## Running on macOS
+
+Open the `.dmg`, drag NexVPN to Applications, then launch normally. In **Proxy mode** (default) no extra permissions are needed.
+
+For **TUN mode** (captures all traffic), the app needs elevated privileges. You can either:
+- Click the **"Run as Administrator"** button in Settings → VPN Mode → TUN, or
+- Launch from terminal:
+```bash
+sudo /Applications/NexVPN.app/Contents/MacOS/NexVPN
+```
+
+> **Note:** On first launch macOS may block the app. Go to **System Settings → Privacy & Security** and click **"Open Anyway"**.
 
 ## Community
 
