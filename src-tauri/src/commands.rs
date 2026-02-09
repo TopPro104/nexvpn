@@ -151,9 +151,11 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
         .ok_or("Server not found")?;
 
     let tun_mode = state.settings.vpn_mode == "tun";
+    let routing_rules = state.routing_rules.clone();
+    let default_route = state.default_route.clone();
 
     ctx.core
-        .start(&server, tun_mode)
+        .start(&server, tun_mode, &routing_rules, &default_route)
         .await
         .map_err(|e| format!("Failed to start core: {}", e))?;
 
@@ -284,8 +286,10 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
             if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
                 let s = server.clone();
                 let tun_mode = state.settings.vpn_mode == "tun";
+                let rules = state.routing_rules.clone();
+                let dr = state.default_route.clone();
                 drop(state);
-                ctx.core.start(&s, tun_mode).await.map_err(|e| e.to_string())?;
+                ctx.core.start(&s, tun_mode, &rules, &dr).await.map_err(|e| e.to_string())?;
             }
         }
     }
@@ -536,9 +540,11 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
                 if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
                     let s = server.clone();
                     let tun_mode = state.settings.vpn_mode == "tun";
+                    let rules = state.routing_rules.clone();
+                    let dr = state.default_route.clone();
                     drop(state);
                     // Reconnect with new ports
-                    if let Err(e) = ctx.core.start(&s, tun_mode).await {
+                    if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr).await {
                         log::error!("Failed to reconnect with new ports: {}", e);
                     }
                     // Update system proxy with new HTTP port (only in proxy mode)
@@ -649,6 +655,53 @@ fn state_path() -> std::path::PathBuf {
             .join("nexvpn")
             .join("state.json")
     }
+}
+
+// ── Routing rules ──────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct RoutingRulesResponse {
+    pub rules: Vec<RoutingRule>,
+    pub default_route: String,
+}
+
+#[tauri::command]
+pub async fn get_routing_rules(ctx: State<'_, AppContext>) -> Result<RoutingRulesResponse, String> {
+    let state = ctx.state.lock().await;
+    Ok(RoutingRulesResponse {
+        rules: state.routing_rules.clone(),
+        default_route: state.default_route.clone(),
+    })
+}
+
+#[tauri::command]
+pub async fn save_routing_rules(
+    rules: Vec<RoutingRule>,
+    default_route: String,
+    ctx: State<'_, AppContext>,
+) -> Result<(), String> {
+    let mut state = ctx.state.lock().await;
+    state.routing_rules = rules;
+    state.default_route = default_route;
+    save_state(&state);
+
+    // If connected, reconnect to apply new rules
+    if ctx.core.is_running().await {
+        if let Some(id) = &state.active_server_id {
+            if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
+                let s = server.clone();
+                let tun_mode = state.settings.vpn_mode == "tun";
+                let rules = state.routing_rules.clone();
+                let dr = state.default_route.clone();
+                drop(state);
+                if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr).await {
+                    log::error!("Failed to reconnect with new routing rules: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub fn load_state() -> AppState {

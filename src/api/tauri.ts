@@ -66,6 +66,20 @@ export interface ConnectionRecord {
   download_bytes: number;
 }
 
+export type RuleAction = "proxy" | "direct" | "block";
+
+export interface RoutingRule {
+  id: string;
+  domain: string;
+  action: RuleAction;
+  enabled: boolean;
+}
+
+export interface RoutingRulesResponse {
+  rules: RoutingRule[];
+  default_route: string;
+}
+
 // ── API calls ──────────────────────────────────
 
 export const api = {
@@ -131,4 +145,9 @@ export const api = {
   getDeviceInfo: () => invoke<DeviceInfo>("get_device_info"),
 
   openUrl: (url: string) => invoke<void>("open_url", { url }),
+
+  getRoutingRules: () => invoke<RoutingRulesResponse>("get_routing_rules"),
+
+  saveRoutingRules: (rules: RoutingRule[], defaultRoute: string) =>
+    invoke<void>("save_routing_rules", { rules, defaultRoute }),
 };

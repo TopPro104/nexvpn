@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::proxy::models::*;
 
 /// Generate a sing-box config for connecting to a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str) -> Result<Value> {
     let outbound = build_outbound(server)?;
 
     // On Android, TUN requires VpnService — force disable
@@ -107,6 +107,24 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         }));
     }
 
+    // User-defined routing rules
+    for rule in routing_rules.iter().filter(|r| r.enabled) {
+        let domain = &rule.domain;
+        match rule.action {
+            RuleAction::Direct => {
+                route_rules.push(json!({ "domain_suffix": [domain], "outbound": "direct" }));
+            }
+            RuleAction::Block => {
+                route_rules.push(json!({ "domain_suffix": [domain], "action": "reject" }));
+            }
+            RuleAction::Proxy => {
+                route_rules.push(json!({ "domain_suffix": [domain], "outbound": "proxy" }));
+            }
+        }
+    }
+
+    let final_route = if default_route == "direct" { "direct" } else { "proxy" };
+
     let config = json!({
         "log": {
             "level": if cfg!(target_os = "android") { "info" } else { "warn" },
@@ -123,7 +141,7 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         ],
         "route": {
             "rules": route_rules,
-            "final": "proxy",
+            "final": final_route,
             "auto_detect_interface": !cfg!(target_os = "android"),
             "default_domain_resolver": {
                 "server": if cfg!(target_os = "android") { "dns-remote" } else if tun_mode { "dns-direct" } else { "dns-local" }

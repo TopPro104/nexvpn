@@ -6,6 +6,7 @@ const translations = {
   "nav.subscriptions": { en: "Subscriptions", ru: "Подписки" },
   "nav.stats": { en: "Statistics", ru: "Статистика" },
   "nav.logs": { en: "Logs", ru: "Логи" },
+  "nav.routing": { en: "Routing", ru: "Маршруты" },
   "nav.settings": { en: "Settings", ru: "Настройки" },
 
   // Status
@@ -113,6 +114,27 @@ const translations = {
   "stats.duration": { en: "Duration", ru: "Длительность" },
   "stats.traffic": { en: "Traffic", ru: "Трафик" },
   "stats.date": { en: "Date", ru: "Дата" },
+
+  // Routing
+  "routing.title": { en: "Routing Rules", ru: "Правила маршрутизации" },
+  "routing.defaultRoute": { en: "Default Route", ru: "Маршрут по умолчанию" },
+  "routing.proxyAll": { en: "Proxy All", ru: "Всё через прокси" },
+  "routing.proxyAllDesc": { en: "All traffic goes through VPN. Add direct rules to bypass specific domains.", ru: "Весь трафик идёт через VPN. Добавьте правила direct для обхода отдельных доменов." },
+  "routing.directAll": { en: "Direct All (Split Tunnel)", ru: "Всё напрямую (Split Tunnel)" },
+  "routing.directAllDesc": { en: "Only proxy-rule domains go through VPN. Everything else is direct.", ru: "Только домены с правилом proxy идут через VPN. Остальное напрямую." },
+  "routing.rules": { en: "Rules", ru: "Правила" },
+  "routing.addRule": { en: "Add Rule", ru: "Добавить правило" },
+  "routing.domain": { en: "Domain", ru: "Домен" },
+  "routing.domainPlaceholder": { en: "e.g. google.com", ru: "напр. google.com" },
+  "routing.action": { en: "Action", ru: "Действие" },
+  "routing.proxy": { en: "Proxy", ru: "Прокси" },
+  "routing.direct": { en: "Direct", ru: "Напрямую" },
+  "routing.block": { en: "Block", ru: "Блокировать" },
+  "routing.noRules": { en: "No routing rules yet. Add one above.", ru: "Нет правил. Добавьте выше." },
+  "routing.presets": { en: "Quick Presets", ru: "Быстрые шаблоны" },
+  "routing.presetAds": { en: "Block Ads", ru: "Блокировка рекламы" },
+  "routing.presetRuDirect": { en: "RU sites direct", ru: "RU сайты напрямую" },
+  "routing.saved": { en: "Routing rules saved", ru: "Правила маршрутизации сохранены" },
 
   // Common
   "common.add": { en: "Add", ru: "Добавить" },

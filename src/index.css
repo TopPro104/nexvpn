@@ -1358,6 +1358,90 @@ input[type="number"] {
   font-size: 11px;
 }
 
+/* ── Routing Page ─────────────────────────────── */
+.routing-page {
+  max-width: 600px;
+}
+.routing-page h2 {
+  font-size: 20px;
+  margin-bottom: 24px;
+}
+.routing-add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.routing-domain-input {
+  flex: 1;
+}
+.routing-action-select {
+  min-width: 100px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.routing-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.routing-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: calc(100vh - 520px);
+  overflow-y: auto;
+}
+.routing-rule-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.routing-rule-card.disabled {
+  opacity: 0.5;
+}
+.routing-action-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  min-width: 54px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.routing-rule-domain {
+  flex: 1;
+  font-size: 13px;
+  font-family: 'Consolas', 'Fira Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routing-rule-toggle {
+  flex-shrink: 0;
+}
+.routing-rule-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.routing-rule-card:hover .routing-rule-delete {
+  opacity: 1;
+}
+.routing-rule-delete:hover {
+  color: var(--danger);
+}
+
 /* ══════════════════════════════════════════════
    STYLE VARIANTS
    ══════════════════════════════════════════════ */
@@ -2079,6 +2163,25 @@ input[type="number"] {
     min-width: unset;
     max-width: calc(100vw - 32px);
     margin: 16px;
+  }
+
+  /* Routing */
+  .routing-page {
+    max-width: 100%;
+  }
+  .routing-add-form {
+    flex-wrap: wrap;
+  }
+  .routing-domain-input {
+    min-width: 0;
+    width: 100%;
+  }
+  .routing-rules-list {
+    max-height: calc(100vh - 560px);
+    max-height: calc(100dvh - 560px);
+  }
+  .routing-rule-delete {
+    opacity: 0.6;
   }
 
   /* Toast */

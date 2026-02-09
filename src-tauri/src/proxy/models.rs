@@ -135,6 +135,26 @@ impl Default for Settings {
     }
 }
 
+/// Action for a routing rule
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleAction {
+    #[default]
+    Proxy,
+    Direct,
+    Block,
+}
+
+/// A user-defined routing rule (domain → action)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingRule {
+    pub id: String,
+    pub domain: String,
+    pub action: RuleAction,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 /// A recorded connection session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionRecord {
@@ -160,7 +180,13 @@ pub struct AppState {
     pub settings: Settings,
     #[serde(default)]
     pub sessions: Vec<ConnectionRecord>,
+    #[serde(default)]
+    pub routing_rules: Vec<RoutingRule>,
+    #[serde(default = "default_route")]
+    pub default_route: String,
 }
+
+fn default_route() -> String { "proxy".to_string() }
 
 /// Which proxy core to use
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

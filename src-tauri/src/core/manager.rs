@@ -111,7 +111,7 @@ impl CoreManager {
         *self.http_port.lock().await
     }
 
-    pub async fn start(&self, server: &Server, tun_mode: bool) -> Result<()> {
+    pub async fn start(&self, server: &Server, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str) -> Result<()> {
         self.stop().await?;
 
         let core_type = self.core_type.lock().await.clone();
@@ -126,8 +126,8 @@ impl CoreManager {
         }
 
         let config = match core_type {
-            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode)?,
-            CoreType::Xray => xray::generate_config(server, socks_port, http_port)?,
+            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, routing_rules, default_route)?,
+            CoreType::Xray => xray::generate_config(server, socks_port, http_port, routing_rules, default_route)?,
         };
 
         let config_path = self.config_dir.join("running_config.json");

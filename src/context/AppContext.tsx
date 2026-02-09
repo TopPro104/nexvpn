@@ -5,12 +5,13 @@ import {
   StatusResponse,
   SubscriptionInfo,
   Settings,
+  RoutingRule,
 } from "../api/tauri";
 import { setLang, Lang } from "../i18n/translations";
 
 // ── State ──────────────────────────────────────
 
-export type Page = "home" | "subscriptions" | "settings" | "logs" | "stats";
+export type Page = "home" | "subscriptions" | "settings" | "logs" | "stats" | "routing";
 
 export interface AppState {
   page: Page;
@@ -24,6 +25,8 @@ export interface AppState {
   socksPort: number;
   httpPort: number;
   settings: Settings;
+  routingRules: RoutingRule[];
+  defaultRoute: string;
   toasts: Toast[];
   langTick: number; // bumped to force re-render on language change
   speedHistory: number[]; // last 60 download speed samples for sparkline
@@ -60,6 +63,8 @@ const initialState: AppState = {
   socksPort: 10808,
   httpPort: 10809,
   settings: defaultSettings,
+  routingRules: [],
+  defaultRoute: "proxy",
   toasts: [],
   langTick: 0,
   speedHistory: [],
@@ -80,7 +85,8 @@ type Action =
   | { type: "ADD_TOAST"; toast: Omit<Toast, "id"> }
   | { type: "REMOVE_TOAST"; id: number }
   | { type: "BUMP_LANG" }
-  | { type: "PUSH_SPEED"; speed: number };
+  | { type: "PUSH_SPEED"; speed: number }
+  | { type: "SET_ROUTING_RULES"; rules: RoutingRule[]; defaultRoute: string };
 
 let toastId = 0;
 
@@ -154,6 +160,8 @@ function reducer(state: AppState, action: Action): AppState {
       const hist = [...state.speedHistory, action.speed];
       return { ...state, speedHistory: hist.slice(-60) };
     }
+    case "SET_ROUTING_RULES":
+      return { ...state, routingRules: action.rules, defaultRoute: action.defaultRoute };
     default:
       return state;
   }
@@ -196,16 +204,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [servers, status, settings, subs] = await Promise.all([
+        const [servers, status, settings, subs, routing] = await Promise.all([
           api.getServers(),
           api.getStatus(),
           api.getSettings(),
           api.getSubscriptions(),
+          api.getRoutingRules(),
         ]);
         dispatch({ type: "SET_SERVERS", servers });
         dispatch({ type: "SET_STATUS", status });
         dispatch({ type: "SET_SETTINGS", settings });
         dispatch({ type: "SET_SUBSCRIPTIONS", subs });
+        dispatch({ type: "SET_ROUTING_RULES", rules: routing.rules, defaultRoute: routing.default_route });
         setLang(settings.language as Lang);
       } catch (e) {
         toast(`Init failed: ${e}`, "error");

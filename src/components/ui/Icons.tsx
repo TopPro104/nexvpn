@@ -113,6 +113,28 @@ export function SettingsIcon({ size, color, className }: IconProps = defaults) {
   );
 }
 
+export function RouteIcon({ size, color, className }: IconProps = defaults) {
+  const s = size ?? 20;
+  const c = color ?? "currentColor";
+  return (
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={c}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="6" cy="19" r="3" />
+      <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H18" />
+      <circle cx="18" cy="5" r="3" />
+    </svg>
+  );
+}
+
 export function PowerIcon({ size, color, className }: IconProps = defaults) {
   const s = size ?? 20;
   const c = color ?? "currentColor";

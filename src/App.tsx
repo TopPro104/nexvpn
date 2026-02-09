@@ -9,6 +9,7 @@ import { SubList } from "./components/subscriptions/SubList";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { LogsPage } from "./components/logs/LogsPage";
 import { StatsPage } from "./components/stats/StatsPage";
+import { RoutingPage } from "./components/routing/RoutingPage";
 import { ToastStack } from "./components/ui/Toast";
 import { useCallback, useRef, useEffect } from "react";
 import { StatusResponse, api } from "./api/tauri";
@@ -118,6 +119,8 @@ function AppContent() {
         return <SubList />;
       case "settings":
         return <SettingsPage />;
+      case "routing":
+        return <RoutingPage />;
       case "logs":
         return <LogsPage />;
       case "stats":

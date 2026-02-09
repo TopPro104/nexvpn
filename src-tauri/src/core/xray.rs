@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::proxy::models::*;
 
 /// Generate a minimal Xray-core config for a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing_rules: &[RoutingRule], default_route: &str) -> Result<Value> {
     let outbound = build_outbound(server)?;
 
     let config = json!({
@@ -77,13 +77,7 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16) -> Resu
         ],
         "routing": {
             "domainStrategy": "AsIs",
-            "rules": [
-                {
-                    "inboundTag": ["api-in"],
-                    "outboundTag": "api",
-                    "type": "field"
-                }
-            ]
+            "rules": build_xray_routing_rules(routing_rules, default_route)
         }
     });
 
@@ -226,4 +220,38 @@ fn build_outbound(server: &Server) -> Result<Value> {
     out["streamSettings"] = stream;
 
     Ok(out)
+}
+
+fn build_xray_routing_rules(routing_rules: &[RoutingRule], default_route: &str) -> Value {
+    let mut rules = vec![
+        json!({
+            "inboundTag": ["api-in"],
+            "outboundTag": "api",
+            "type": "field"
+        }),
+    ];
+
+    for rule in routing_rules.iter().filter(|r| r.enabled) {
+        let tag = match rule.action {
+            RuleAction::Direct => "direct",
+            RuleAction::Block => "block",
+            RuleAction::Proxy => "proxy",
+        };
+        rules.push(json!({
+            "type": "field",
+            "domain": [format!("domain:{}", rule.domain)],
+            "outboundTag": tag
+        }));
+    }
+
+    // If default is "direct", add a catch-all direct rule (xray uses first outbound as default)
+    if default_route == "direct" {
+        rules.push(json!({
+            "type": "field",
+            "network": "tcp,udp",
+            "outboundTag": "direct"
+        }));
+    }
+
+    json!(rules)
 }
