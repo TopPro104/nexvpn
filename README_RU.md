@@ -121,6 +121,12 @@ nexvpn/
 └── README.md
 ```
 
+## Сообщество
+
+Присоединяйтесь к нашей Telegram-группе для обновлений, поддержки и обсуждений:
+
+[![Telegram](https://img.shields.io/badge/Telegram-NexVPN-2CA5E0?logo=telegram&logoColor=white)](https://t.me/NexVPNcom)
+
 ## Лицензия
 
 [MIT License](LICENSE) — свободное использование, модификация и распространение. Подробности в файле LICENSE.
