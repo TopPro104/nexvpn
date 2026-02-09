@@ -150,4 +150,12 @@ export const api = {
 
   saveRoutingRules: (rules: RoutingRule[], defaultRoute: string) =>
     invoke<void>("save_routing_rules", { rules, defaultRoute }),
+
+  getOnboardingCompleted: () => invoke<boolean>("get_onboarding_completed"),
+
+  completeOnboarding: () => invoke<void>("complete_onboarding"),
+
+  isAdmin: () => invoke<boolean>("is_admin"),
+
+  restartAsAdmin: () => invoke<void>("restart_as_admin"),
 };

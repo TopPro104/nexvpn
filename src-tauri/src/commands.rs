@@ -704,6 +704,111 @@ pub async fn save_routing_rules(
     Ok(())
 }
 
+/// Check if onboarding is completed
+#[tauri::command]
+pub async fn get_onboarding_completed(ctx: State<'_, AppContext>) -> Result<bool, String> {
+    let state = ctx.state.lock().await;
+    Ok(state.onboarding_completed)
+}
+
+/// Mark onboarding as completed
+#[tauri::command]
+pub async fn complete_onboarding(ctx: State<'_, AppContext>) -> Result<(), String> {
+    let mut state = ctx.state.lock().await;
+    state.onboarding_completed = true;
+    save_state(&state);
+    Ok(())
+}
+
+/// Check if the process is running with elevated (admin) privileges
+#[tauri::command]
+pub fn is_admin() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        // Check via "net session" — only succeeds when running as admin
+        std::process::Command::new("net")
+            .args(["session"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS check effective UID via id -u
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "android")]
+    {
+        // Android handles VPN through VpnService, no admin needed
+        true
+    }
+}
+
+/// Restart the application with elevated (admin) privileges
+#[tauri::command]
+pub fn restart_as_admin(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // Use ShellExecuteW via powershell Start-Process -Verb RunAs
+        std::process::Command::new("powershell")
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .args([
+                "-Command",
+                &format!(
+                    "Start-Process '{}' -Verb RunAs",
+                    exe.display()
+                ),
+            ])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use osascript to prompt for admin
+        std::process::Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "do shell script \"'{}' &\" with administrator privileges",
+                    exe.display()
+                ),
+            ])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try pkexec
+        std::process::Command::new("pkexec")
+            .arg(exe)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Close current instance
+    app_handle.exit(0);
+    Ok(())
+}
+
 pub fn load_state() -> AppState {
     let path = state_path();
     if path.exists() {

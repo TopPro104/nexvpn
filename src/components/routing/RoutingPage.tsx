@@ -1,27 +1,53 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { api, RoutingRule, RuleAction } from "../../api/tauri";
 import { t } from "../../i18n/translations";
+import { getLang } from "../../i18n/translations";
 
-const ADS_DOMAINS = [
-  "doubleclick.net",
-  "googlesyndication.com",
-  "googleadservices.com",
-  "adnxs.com",
-  "ads.yahoo.com",
-  "moatads.com",
-  "adcolony.com",
+export interface Preset {
+  id: string;
+  name_en: string;
+  name_ru: string;
+  action: RuleAction;
+  domains: string[];
+}
+
+const FALLBACK_PRESETS: Preset[] = [
+  {
+    id: "block_ads",
+    name_en: "Block Ads",
+    name_ru: "Блокировка рекламы",
+    action: "block",
+    domains: [
+      "doubleclick.net",
+      "googlesyndication.com",
+      "googleadservices.com",
+      "adnxs.com",
+      "ads.yahoo.com",
+      "moatads.com",
+      "adcolony.com",
+      "direct.yandex.ru",
+    ],
+  },
+  {
+    id: "ru_direct",
+    name_en: "RU sites direct",
+    name_ru: "RU сайты напрямую",
+    action: "direct",
+    domains: [
+      "yandex.ru",
+      "mail.ru",
+      "vk.com",
+      "ok.ru",
+      "dzen.ru",
+      "rutube.ru",
+      "gosuslugi.ru",
+    ],
+  },
 ];
 
-const RU_DOMAINS = [
-  "yandex.ru",
-  "mail.ru",
-  "vk.com",
-  "ok.ru",
-  "dzen.ru",
-  "rutube.ru",
-  "gosuslugi.ru",
-];
+const PRESETS_URL =
+  "https://raw.githubusercontent.com/TopPro104/nexvpn/main/presets.json";
 
 let idCounter = Date.now();
 function nextId() {
@@ -34,7 +60,24 @@ export function RoutingPage() {
 
   const [newDomain, setNewDomain] = useState("");
   const [newAction, setNewAction] = useState<RuleAction>("direct");
+  const [presets, setPresets] = useState<Preset[]>(FALLBACK_PRESETS);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    fetch(PRESETS_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((data: { presets: Preset[] }) => {
+        if (data.presets && data.presets.length > 0) {
+          setPresets(data.presets);
+        }
+      })
+      .catch(() => {
+        // Use fallback presets silently
+      });
+  }, []);
 
   const save = useCallback(
     (rules: RoutingRule[], defaultRoute: string) => {
@@ -117,6 +160,8 @@ export function RoutingPage() {
     }
   };
 
+  const lang = getLang();
+
   return (
     <div className="routing-page">
       <h2>{t("routing.title")}</h2>
@@ -189,18 +234,15 @@ export function RoutingPage() {
       <div className="settings-section">
         <div className="settings-label">{t("routing.presets")}</div>
         <div className="routing-presets">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => addPreset(ADS_DOMAINS, "block")}
-          >
-            {t("routing.presetAds")}
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => addPreset(RU_DOMAINS, "direct")}
-          >
-            {t("routing.presetRuDirect")}
-          </button>
+          {presets.map((preset) => (
+            <button
+              key={preset.id}
+              className="btn btn-secondary btn-sm"
+              onClick={() => addPreset(preset.domains, preset.action)}
+            >
+              {lang === "ru" ? preset.name_ru : preset.name_en}
+            </button>
+          ))}
         </div>
       </div>
 

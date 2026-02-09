@@ -30,6 +30,7 @@ export interface AppState {
   toasts: Toast[];
   langTick: number; // bumped to force re-render on language change
   speedHistory: number[]; // last 60 download speed samples for sparkline
+  onboardingCompleted: boolean;
 }
 
 export interface Toast {
@@ -68,6 +69,7 @@ const initialState: AppState = {
   toasts: [],
   langTick: 0,
   speedHistory: [],
+  onboardingCompleted: true, // default true until we load real value
 };
 
 // ── Actions ────────────────────────────────────
@@ -86,7 +88,8 @@ type Action =
   | { type: "REMOVE_TOAST"; id: number }
   | { type: "BUMP_LANG" }
   | { type: "PUSH_SPEED"; speed: number }
-  | { type: "SET_ROUTING_RULES"; rules: RoutingRule[]; defaultRoute: string };
+  | { type: "SET_ROUTING_RULES"; rules: RoutingRule[]; defaultRoute: string }
+  | { type: "SET_ONBOARDING_COMPLETED"; completed: boolean };
 
 let toastId = 0;
 
@@ -162,6 +165,8 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "SET_ROUTING_RULES":
       return { ...state, routingRules: action.rules, defaultRoute: action.defaultRoute };
+    case "SET_ONBOARDING_COMPLETED":
+      return { ...state, onboardingCompleted: action.completed };
     default:
       return state;
   }
@@ -204,18 +209,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [servers, status, settings, subs, routing] = await Promise.all([
+        const [servers, status, settings, subs, routing, onboardingDone] = await Promise.all([
           api.getServers(),
           api.getStatus(),
           api.getSettings(),
           api.getSubscriptions(),
           api.getRoutingRules(),
+          api.getOnboardingCompleted(),
         ]);
         dispatch({ type: "SET_SERVERS", servers });
         dispatch({ type: "SET_STATUS", status });
         dispatch({ type: "SET_SETTINGS", settings });
         dispatch({ type: "SET_SUBSCRIPTIONS", subs });
         dispatch({ type: "SET_ROUTING_RULES", rules: routing.rules, defaultRoute: routing.default_route });
+        dispatch({ type: "SET_ONBOARDING_COMPLETED", completed: onboardingDone });
         setLang(settings.language as Lang);
       } catch (e) {
         toast(`Init failed: ${e}`, "error");

@@ -184,6 +184,8 @@ pub struct AppState {
     pub routing_rules: Vec<RoutingRule>,
     #[serde(default = "default_route")]
     pub default_route: String,
+    #[serde(default)]
+    pub onboarding_completed: bool,
 }
 
 fn default_route() -> String { "proxy".to_string() }

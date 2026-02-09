@@ -10,8 +10,9 @@ import { SettingsPage } from "./components/settings/SettingsPage";
 import { LogsPage } from "./components/logs/LogsPage";
 import { StatsPage } from "./components/stats/StatsPage";
 import { RoutingPage } from "./components/routing/RoutingPage";
+import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { ToastStack } from "./components/ui/Toast";
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import { StatusResponse, api } from "./api/tauri";
 import { onOpenUrl, getCurrent as getDeepLinkUrls } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
@@ -21,6 +22,14 @@ function AppContent() {
   const { state, dispatch, toast } = useApp();
   const reconnectingRef = useRef(false);
   const prevConnectedRef = useRef(state.connected);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // Show onboarding when state loads and is not completed
+  useEffect(() => {
+    if (!state.onboardingCompleted) {
+      setShowOnboarding(true);
+    }
+  }, [state.onboardingCompleted]);
 
   // Apply theme + style + animation
   useTheme(state.settings.theme, state.settings.style, state.settings.animation);
@@ -132,6 +141,9 @@ function AppContent() {
     <Layout>
       {renderPage()}
       <ToastStack />
+      {showOnboarding && (
+        <OnboardingOverlay onComplete={() => setShowOnboarding(false)} />
+      )}
     </Layout>
   );
 }

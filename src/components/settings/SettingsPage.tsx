@@ -23,10 +23,12 @@ export function SettingsPage() {
   void state.langTick;
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [hwidCopied, setHwidCopied] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(true); // assume admin until checked
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     api.getDeviceInfo().then(setDeviceInfo).catch(() => {});
+    api.isAdmin().then(setIsAdmin).catch(() => {});
   }, []);
 
   // Auto-apply: save settings with debounce
@@ -182,6 +184,18 @@ export function SettingsPage() {
             <div className="vpn-mode-info">
               <span className="vpn-mode-title">{t("settings.vpnMode.tun")}</span>
               <span className="vpn-mode-desc">{t("settings.vpnMode.tunDesc")}</span>
+              {!isAdmin && (
+                <button
+                  className="btn btn-elevate btn-sm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    api.restartAsAdmin().catch((err) => toast(`${err}`, "error"));
+                  }}
+                >
+                  {t("settings.vpnMode.requestAdmin")}
+                </button>
+              )}
             </div>
           </label>
         </div>

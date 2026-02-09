@@ -163,6 +163,10 @@ pub fn run() {
             commands::open_url,
             commands::get_routing_rules,
             commands::save_routing_rules,
+            commands::get_onboarding_completed,
+            commands::complete_onboarding,
+            commands::is_admin,
+            commands::restart_as_admin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NexVPN");
