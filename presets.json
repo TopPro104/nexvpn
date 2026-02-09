@@ -1,0 +1,35 @@
+{
+  "presets": [
+    {
+      "id": "block_ads",
+      "name_en": "Block Ads",
+      "name_ru": "Блокировка рекламы",
+      "action": "block",
+      "domains": [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adnxs.com",
+        "ads.yahoo.com",
+        "moatads.com",
+        "adcolony.com",
+        "direct.yandex.ru"
+      ]
+    },
+    {
+      "id": "ru_direct",
+      "name_en": "RU sites direct",
+      "name_ru": "RU сайты напрямую",
+      "action": "direct",
+      "domains": [
+        "yandex.ru",
+        "mail.ru",
+        "vk.com",
+        "ok.ru",
+        "dzen.ru",
+        "rutube.ru",
+        "gosuslugi.ru"
+      ]
+    }
+  ]
+}
