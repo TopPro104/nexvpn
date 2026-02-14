@@ -146,7 +146,9 @@ Join our Telegram group for updates, support, and discussion:
 
 ## License
 
-[MIT License](LICENSE) — free to use, modify, and distribute. See LICENSE for details.
+[GNU GPLv3](LICENSE) — free to use, modify, and distribute. 
+This software is provided under the GNU General Public License v3.0.
+See LICENSE for details.
 
 ## Publisher
 

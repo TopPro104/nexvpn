@@ -146,7 +146,9 @@ sudo /Applications/NexVPN.app/Contents/MacOS/NexVPN
 
 ## Лицензия
 
-[MIT License](LICENSE) — свободное использование, модификация и распространение. Подробности в файле LICENSE.
+[GNU GPLv3](LICENSE) — свободное использование, модификация и распространение.
+Это программное обеспечение распространяется на условиях лицензии GNU General Public License v3.0.
+Подробности в файле LICENSE.
 
 ## Издатель
 
