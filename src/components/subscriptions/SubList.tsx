@@ -56,7 +56,7 @@ export function SubList() {
     <div className="sub-page">
       <div className="sub-header">
         <h2>{t("subs.title")}</h2>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="sub-header-actions">
           <Button
             variant="secondary"
             onClick={() => api.openUrl("https://t.me/vpnhorbot")}

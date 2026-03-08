@@ -167,6 +167,15 @@ pub fn run() {
             commands::complete_onboarding,
             commands::is_admin,
             commands::restart_as_admin,
+            commands::check_ip,
+            commands::check_dns_leak,
+            commands::run_speed_test,
+            commands::check_for_updates,
+            commands::toggle_favorite,
+            commands::get_daily_traffic,
+            commands::get_server_usage_stats,
+            commands::read_tile_action,
+            commands::get_active_server_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NexVPN");

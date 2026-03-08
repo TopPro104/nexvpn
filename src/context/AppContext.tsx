@@ -12,6 +12,20 @@ import { setLang, Lang } from "../i18n/translations";
 // ── State ──────────────────────────────────────
 
 export type Page = "home" | "subscriptions" | "settings" | "logs" | "stats" | "routing";
+export type SettingsTab = "style" | "vpn" | "other";
+export type StatsTab = "overview" | "traffic" | "history";
+export type LogsFilter = "all" | "errors" | "warnings";
+
+// ── Persisted UI state ────────────────────────
+export type SortKey = "name" | "ping" | "protocol" | "country";
+export type ViewMode = "list" | "grid";
+
+export interface ServerListUI {
+  search: string;
+  tab: string;
+  sortBy: SortKey;
+  viewMode: ViewMode;
+}
 
 export interface AppState {
   page: Page;
@@ -31,6 +45,12 @@ export interface AppState {
   langTick: number; // bumped to force re-render on language change
   speedHistory: number[]; // last 60 download speed samples for sparkline
   onboardingCompleted: boolean;
+  serverListUI: ServerListUI;
+  userLocation: { x: number; y: number } | null;
+  recentServerIds: string[];
+  settingsTab: SettingsTab;
+  statsTab: StatsTab;
+  logsFilter: LogsFilter;
 }
 
 export interface Toast {
@@ -70,6 +90,12 @@ const initialState: AppState = {
   langTick: 0,
   speedHistory: [],
   onboardingCompleted: true, // default true until we load real value
+  serverListUI: { search: "", tab: "all", sortBy: "name" as SortKey, viewMode: "list" as ViewMode },
+  userLocation: null,
+  recentServerIds: [],
+  settingsTab: "style" as SettingsTab,
+  statsTab: "overview" as StatsTab,
+  logsFilter: "all" as LogsFilter,
 };
 
 // ── Actions ────────────────────────────────────
@@ -89,7 +115,13 @@ type Action =
   | { type: "BUMP_LANG" }
   | { type: "PUSH_SPEED"; speed: number }
   | { type: "SET_ROUTING_RULES"; rules: RoutingRule[]; defaultRoute: string }
-  | { type: "SET_ONBOARDING_COMPLETED"; completed: boolean };
+  | { type: "SET_ONBOARDING_COMPLETED"; completed: boolean }
+  | { type: "SET_SERVER_LIST_UI"; ui: Partial<ServerListUI> }
+  | { type: "SET_USER_LOCATION"; location: { x: number; y: number } }
+  | { type: "TRACK_RECENT_SERVER"; id: string }
+  | { type: "SET_SETTINGS_TAB"; tab: SettingsTab }
+  | { type: "SET_STATS_TAB"; tab: StatsTab }
+  | { type: "SET_LOGS_FILTER"; filter: LogsFilter };
 
 let toastId = 0;
 
@@ -124,7 +156,6 @@ function reducer(state: AppState, action: Action): AppState {
     case "SET_STATUS": {
       const wasConnected = state.connected;
       const nowConnected = action.status.connected;
-      // Set connectedAt only on fresh connection; keep existing on status refresh
       let connectedAt = state.connectedAt;
       if (nowConnected && !wasConnected) {
         connectedAt = Date.now();
@@ -132,6 +163,11 @@ function reducer(state: AppState, action: Action): AppState {
         connectedAt = null;
       }
       const speedHistory = nowConnected ? state.speedHistory : [];
+      // Track recently used server
+      let recentServerIds = state.recentServerIds;
+      if (nowConnected && !wasConnected && state.selectedServerId) {
+        recentServerIds = [state.selectedServerId, ...recentServerIds.filter(id => id !== state.selectedServerId)].slice(0, 5);
+      }
       return {
         ...state,
         connected: nowConnected,
@@ -141,6 +177,7 @@ function reducer(state: AppState, action: Action): AppState {
         socksPort: action.status.socks_port,
         httpPort: action.status.http_port,
         speedHistory,
+        recentServerIds,
       };
     }
     case "SELECT_SERVER":
@@ -167,6 +204,20 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, routingRules: action.rules, defaultRoute: action.defaultRoute };
     case "SET_ONBOARDING_COMPLETED":
       return { ...state, onboardingCompleted: action.completed };
+    case "SET_SERVER_LIST_UI":
+      return { ...state, serverListUI: { ...state.serverListUI, ...action.ui } };
+    case "SET_USER_LOCATION":
+      return { ...state, userLocation: action.location };
+    case "TRACK_RECENT_SERVER": {
+      const ids = [action.id, ...state.recentServerIds.filter(id => id !== action.id)].slice(0, 5);
+      return { ...state, recentServerIds: ids };
+    }
+    case "SET_SETTINGS_TAB":
+      return { ...state, settingsTab: action.tab };
+    case "SET_STATS_TAB":
+      return { ...state, statsTab: action.tab };
+    case "SET_LOGS_FILTER":
+      return { ...state, logsFilter: action.filter };
     default:
       return state;
   }
@@ -209,13 +260,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [servers, status, settings, subs, routing, onboardingDone] = await Promise.all([
+        const [servers, status, settings, subs, routing, onboardingDone, activeServerId] = await Promise.all([
           api.getServers(),
           api.getStatus(),
           api.getSettings(),
           api.getSubscriptions(),
           api.getRoutingRules(),
           api.getOnboardingCompleted(),
+          api.getActiveServerId(),
         ]);
         dispatch({ type: "SET_SERVERS", servers });
         dispatch({ type: "SET_STATUS", status });
@@ -224,6 +276,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_ROUTING_RULES", rules: routing.rules, defaultRoute: routing.default_route });
         dispatch({ type: "SET_ONBOARDING_COMPLETED", completed: onboardingDone });
         setLang(settings.language as Lang);
+
+        // Restore selected server: active > first available
+        const serverId = activeServerId ?? (servers.length > 0 ? servers[0].id : null);
+        if (serverId) {
+          dispatch({ type: "SELECT_SERVER", id: serverId });
+        }
       } catch (e) {
         toast(`Init failed: ${e}`, "error");
       }

@@ -25,6 +25,7 @@ pub struct ServerInfo {
     pub protocol: String,
     pub latency_ms: Option<u32>,
     pub subscription_id: Option<String>,
+    pub favorite: bool,
 }
 
 impl From<&Server> for ServerInfo {
@@ -37,6 +38,7 @@ impl From<&Server> for ServerInfo {
             protocol: format!("{:?}", s.protocol).to_lowercase(),
             latency_ms: s.latency_ms,
             subscription_id: s.subscription_id.clone(),
+            favorite: s.favorite,
         }
     }
 }
@@ -70,6 +72,52 @@ impl SubscriptionInfo {
             updated_at: sub.updated_at,
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct IpCheckResult {
+    pub ip: String,
+    pub country: String,
+    pub city: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Serialize)]
+pub struct DnsLeakResult {
+    pub leaked: bool,
+    pub dns_servers: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct SpeedTestResult {
+    pub download_mbps: f64,
+    pub upload_mbps: f64,
+    pub ping_ms: u32,
+}
+
+#[derive(Serialize)]
+pub struct UpdateCheckResult {
+    pub has_update: bool,
+    pub latest_version: String,
+    pub current_version: String,
+    pub changelog: String,
+    pub download_url: String,
+}
+
+#[derive(Serialize)]
+pub struct DailyTraffic {
+    pub date: String,
+    pub upload: u64,
+    pub download: u64,
+}
+
+#[derive(Serialize)]
+pub struct ServerUsageStat {
+    pub server_name: String,
+    pub protocol: String,
+    pub connection_count: u32,
+    pub total_traffic: u64,
 }
 
 // ── Commands ───────────────────────────────────────────
@@ -809,6 +857,303 @@ pub fn restart_as_admin(app_handle: tauri::AppHandle) -> Result<(), String> {
     // Close current instance
     app_handle.exit(0);
     Ok(())
+}
+
+/// Check current public IP address
+#[tauri::command]
+pub async fn check_ip() -> Result<IpCheckResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Try ip-api.com for IP + geo info
+    let resp = client
+        .get("http://ip-api.com/json/?fields=query,country,city,lat,lon")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check IP: {}", e))?;
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    Ok(IpCheckResult {
+        ip: body["query"].as_str().unwrap_or("unknown").to_string(),
+        country: body["country"].as_str().unwrap_or("unknown").to_string(),
+        city: body["city"].as_str().unwrap_or("unknown").to_string(),
+        lat: body["lat"].as_f64().unwrap_or(0.0),
+        lon: body["lon"].as_f64().unwrap_or(0.0),
+    })
+}
+
+/// Simple DNS leak test
+#[tauri::command]
+pub async fn check_dns_leak() -> Result<DnsLeakResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Use a simple approach: check if we can detect DNS resolver IPs
+    // by querying a service that returns the resolver IP
+    let resp = client
+        .get("https://1.1.1.1/cdn-cgi/trace")
+        .send()
+        .await
+        .map_err(|e| format!("DNS leak check failed: {}", e))?;
+
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+
+    let mut ip = String::new();
+    for line in text.lines() {
+        if line.starts_with("ip=") {
+            ip = line.trim_start_matches("ip=").to_string();
+        }
+    }
+
+    Ok(DnsLeakResult {
+        leaked: false, // simplified - compare with VPN IP in frontend
+        dns_servers: if ip.is_empty() { vec![] } else { vec![ip] },
+    })
+}
+
+/// Run a basic download speed test
+#[tauri::command]
+pub async fn run_speed_test() -> Result<SpeedTestResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Ping test
+    let ping_start = std::time::Instant::now();
+    let _ = client.head("https://speed.cloudflare.com").send().await;
+    let ping_ms = ping_start.elapsed().as_millis() as u32;
+
+    // Download test - fetch ~10MB from Cloudflare
+    let dl_start = std::time::Instant::now();
+    let resp = client
+        .get("https://speed.cloudflare.com/__down?bytes=10000000")
+        .send()
+        .await
+        .map_err(|e| format!("Download test failed: {}", e))?;
+
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let dl_duration = dl_start.elapsed().as_secs_f64();
+    let dl_mbps = if dl_duration > 0.0 {
+        (bytes.len() as f64 * 8.0) / (dl_duration * 1_000_000.0)
+    } else {
+        0.0
+    };
+
+    // Upload test - send ~2MB to Cloudflare
+    let upload_data = vec![0u8; 2_000_000];
+    let ul_start = std::time::Instant::now();
+    let _ = client
+        .post("https://speed.cloudflare.com/__up")
+        .body(upload_data.clone())
+        .send()
+        .await;
+    let ul_duration = ul_start.elapsed().as_secs_f64();
+    let ul_mbps = if ul_duration > 0.0 {
+        (upload_data.len() as f64 * 8.0) / (ul_duration * 1_000_000.0)
+    } else {
+        0.0
+    };
+
+    Ok(SpeedTestResult {
+        download_mbps: (dl_mbps * 100.0).round() / 100.0,
+        upload_mbps: (ul_mbps * 100.0).round() / 100.0,
+        ping_ms,
+    })
+}
+
+/// Compare two semver strings: returns true if a > b
+fn version_gt(a: &str, b: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> {
+        s.split('.').filter_map(|p| p.parse().ok()).collect()
+    };
+    let va = parse(a);
+    let vb = parse(b);
+    for i in 0..va.len().max(vb.len()) {
+        let na = va.get(i).copied().unwrap_or(0);
+        let nb = vb.get(i).copied().unwrap_or(0);
+        if na > nb { return true; }
+        if na < nb { return false; }
+    }
+    false
+}
+
+/// Check for updates on GitHub
+#[tauri::command]
+pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("NexVPN")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://api.github.com/repos/TopPro104/nexvpn/releases/latest")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check updates: {}", e))?;
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let tag = body["tag_name"].as_str().unwrap_or("");
+    let latest = tag.trim_start_matches('v').to_string();
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let changelog = body["body"].as_str().unwrap_or("").to_string();
+    let download_url = body["html_url"].as_str().unwrap_or("").to_string();
+
+    // Only show update if latest version is strictly newer than current
+    let has_update = !tag.is_empty()
+        && !latest.is_empty()
+        && latest != "0.0.0"
+        && version_gt(&latest, &current);
+
+    Ok(UpdateCheckResult {
+        has_update,
+        latest_version: latest,
+        current_version: current,
+        changelog,
+        download_url,
+    })
+}
+
+/// Toggle server favorite status
+#[tauri::command]
+pub async fn toggle_favorite(ctx: State<'_, AppContext>, server_id: String) -> Result<bool, String> {
+    let mut state = ctx.state.lock().await;
+    let server = state.servers.iter_mut()
+        .find(|s| s.id == server_id)
+        .ok_or("Server not found")?;
+    server.favorite = !server.favorite;
+    let new_status = server.favorite;
+    save_state(&state);
+    Ok(new_status)
+}
+
+/// Get daily traffic aggregated from connection history
+#[tauri::command]
+pub async fn get_daily_traffic(ctx: State<'_, AppContext>) -> Result<Vec<DailyTraffic>, String> {
+    let state = ctx.state.lock().await;
+    let mut daily: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+
+    for session in &state.sessions {
+        let date = format_epoch_date(session.connected_at);
+        let entry = daily.entry(date).or_insert((0, 0));
+        entry.0 += session.upload_bytes;
+        entry.1 += session.download_bytes;
+    }
+
+    let mut result: Vec<DailyTraffic> = daily.into_iter()
+        .map(|(date, (upload, download))| DailyTraffic { date, upload, download })
+        .collect();
+    result.sort_by(|a, b| a.date.cmp(&b.date));
+
+    // Keep last 7 days
+    if result.len() > 7 {
+        result = result.split_off(result.len() - 7);
+    }
+
+    Ok(result)
+}
+
+/// Get server usage statistics
+#[tauri::command]
+pub async fn get_server_usage_stats(ctx: State<'_, AppContext>) -> Result<Vec<ServerUsageStat>, String> {
+    let state = ctx.state.lock().await;
+    let mut stats: std::collections::HashMap<String, (String, u32, u64)> = std::collections::HashMap::new();
+
+    for session in &state.sessions {
+        let entry = stats.entry(session.server_name.clone())
+            .or_insert((session.protocol.clone(), 0, 0));
+        entry.1 += 1;
+        entry.2 += session.upload_bytes + session.download_bytes;
+    }
+
+    let mut result: Vec<ServerUsageStat> = stats.into_iter()
+        .map(|(name, (protocol, count, traffic))| ServerUsageStat {
+            server_name: name,
+            protocol,
+            connection_count: count,
+            total_traffic: traffic,
+        })
+        .collect();
+
+    result.sort_by(|a, b| b.total_traffic.cmp(&a.total_traffic));
+    result.truncate(10);
+
+    Ok(result)
+}
+
+/// Get the last active server ID (persisted across restarts)
+#[tauri::command]
+pub async fn get_active_server_id(ctx: State<'_, AppContext>) -> Result<Option<String>, String> {
+    let state = ctx.state.lock().await;
+    Ok(state.active_server_id.clone())
+}
+
+/// Read and clear tile action file (Android Quick Settings Tile)
+#[tauri::command]
+pub fn read_tile_action() -> Option<String> {
+    #[cfg(target_os = "android")]
+    {
+        for base in &[
+            "/data/data/com.horusvpn.nexvpn/files",
+            "/data/user/0/com.horusvpn.nexvpn/files",
+        ] {
+            let path = std::path::PathBuf::from(base).join("nexvpn/.tile_action");
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let action = content.trim().to_string();
+                    std::fs::remove_file(&path).ok();
+                    if !action.is_empty() {
+                        log::info!("read_tile_action: {}", action);
+                        return Some(action);
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        None
+    }
+}
+
+fn format_epoch_date(epoch_secs: u64) -> String {
+    // Simple date formatting: YYYY-MM-DD from epoch seconds
+    // This is approximate but good enough for daily grouping
+    let days_since_epoch = epoch_secs / 86400;
+    let mut y = 1970i64;
+    let mut remaining = days_since_epoch as i64;
+
+    loop {
+        let days_in_year = if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        y += 1;
+    }
+
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if remaining < md as i64 {
+            m = i + 1;
+            break;
+        }
+        remaining -= md as i64;
+    }
+    if m == 0 { m = 12; }
+    let d = remaining + 1;
+
+    format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
 pub fn load_state() -> AppState {

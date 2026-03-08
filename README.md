@@ -21,18 +21,25 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **Dual core** — switch between sing-box and Xray-core in one click
 - **Subscriptions** — import and auto-update subscription URLs
 - **Link import** — paste `vless://`, `vmess://`, `ss://`, `trojan://` links directly
+- **Deep links** — open `nexvpn://import/URL` to add subscriptions from browser
 - **Routing rules** — domain-based rules (proxy / direct / block) with quick presets for ads blocking and regional bypass
 - **Split tunneling** — choose default route: proxy all traffic or only selected domains (Direct All mode)
 - **System Proxy & TUN mode** — system HTTP proxy or full TUN VPN (captures all traffic)
 - **Admin elevation** — one-click "Run as Administrator" button for TUN mode (Windows UAC / macOS sudo prompt)
 - **Onboarding** — interactive guided tour for first-time users with language selection
 - **TCP ping** — single and bulk server latency testing, auto-select best server
-- **Themes** — 4 color themes (Dark, Light, Midnight, Cyber)
+- **Quick connect** — recently used and recommended servers for one-tap connection
+- **World map** — interactive map visualization of server locations
+- **Themes** — 7 color themes (Dark, Light, Midnight Blue, Cyberpunk, Aurora, Sunset, Matrix)
 - **Styles** — Default, Modern Minimal, Glassmorphism, Neon Glow
 - **Animations** — None, Smooth, Energetic (configurable, CSS-only)
-- **Statistics** — connection history, traffic totals, live speed graph
+- **Statistics** — connection history, traffic totals, live speed graph with overview/traffic/history tabs
+- **Logs** — real-time log viewer with level filtering (All / Errors / Warnings)
 - **i18n** — English and Russian
 - **HWID** — optional device fingerprint for panel-based subscriptions
+- **Keyboard shortcuts** — number keys (1-6) for navigation, Shift+D connect/disconnect, Shift+F search
+- **Auto-reconnect** — automatically reconnects if the VPN connection drops unexpectedly
+- **Adaptive UI** — responsive layout with floating sidebar on desktop and bottom navigation bar on mobile
 - **Cross-platform** — Windows, macOS, Android from a single codebase
 - **Lightweight** — single binary, no Electron, ~16 MB app size
 
@@ -47,6 +54,7 @@ Pre-built installers for Windows (x64), macOS (Apple Silicon) and Android (APK) 
 - [Rust](https://rustup.rs/) 1.70+
 - [Node.js](https://nodejs.org/) 18+
 - Tauri CLI: `cargo install tauri-cli`
+- For Android: Android SDK, NDK and Java (Android Studio recommended)
 
 ### 1. Clone the repository
 
@@ -88,8 +96,11 @@ For TUN mode on Windows, also place `wintun.dll` in `src-tauri/binaries/`.
 # Development
 cargo tauri dev
 
-# Production build (creates installer)
+# Production build — Windows (MSI + NSIS installer)
 cargo tauri build
+
+# Production build — Android (unsigned APK)
+npx tauri android build --apk
 ```
 
 ## Project structure
@@ -98,11 +109,20 @@ cargo tauri build
 nexvpn/
 ├── src/                        # React frontend
 │   ├── api/tauri.ts            # Tauri IPC bindings
-│   ├── components/             # UI components
+│   ├── components/
+│   │   ├── home/               # StatusPanel, ServerList, TrafficPanel, QuickConnect, WorldMap
+│   │   ├── layout/             # Layout (top bar + sub-tabs), Sidebar
+│   │   ├── settings/           # SettingsPage (style / vpn / other tabs)
+│   │   ├── subscriptions/      # SubList
+│   │   ├── routing/            # RoutingPage
+│   │   ├── stats/              # StatsPage (overview / traffic / history)
+│   │   ├── logs/               # LogsPage (with level filtering)
+│   │   ├── onboarding/         # OnboardingOverlay
+│   │   └── ui/                 # Icons, Toast, shared UI
 │   ├── context/AppContext.tsx   # Global state (useReducer)
-│   ├── hooks/                  # useTheme, useStatus
+│   ├── hooks/                  # useTheme, useStatus, useTraffic
 │   ├── i18n/translations.ts    # EN/RU translations
-│   ├── themes/                 # Color theme definitions
+│   ├── themes/themes.ts        # 7 color theme definitions
 │   └── index.css               # All styles (no CSS framework)
 ├── src-tauri/src/
 │   ├── lib.rs                  # Tauri app setup
@@ -117,10 +137,11 @@ nexvpn/
 │   │   └── subscription.rs     # Subscription fetcher
 │   ├── system/
 │   │   ├── proxy_setter.rs     # Windows system proxy control
-│   │   └── hwid.rs             # Device fingerprint
+│   │   └── hwid.rs             # HWID generation for panel auth
 │   └── testing/
 │       └── ping.rs             # TCP latency testing
 ├── download-cores.sh           # Core binary downloader
+├── sign-apk.bat                # Android APK signing script
 ├── LICENSE
 └── README.md
 ```
@@ -138,6 +159,12 @@ sudo /Applications/NexVPN.app/Contents/MacOS/NexVPN
 
 > **Note:** On first launch macOS may block the app. Go to **System Settings → Privacy & Security** and click **"Open Anyway"**.
 
+## Running on Android
+
+Install the APK directly. The app uses a responsive mobile layout with a bottom navigation bar. All features work the same as on desktop.
+
+For TUN mode, Android will prompt you to allow VPN permissions on first connect.
+
 ## Community
 
 Join our Telegram group for updates, support, and discussion:
@@ -146,7 +173,7 @@ Join our Telegram group for updates, support, and discussion:
 
 ## License
 
-[GNU GPLv3](LICENSE) — free to use, modify, and distribute. 
+[GNU GPLv3](LICENSE) — free to use, modify, and distribute.
 This software is provided under the GNU General Public License v3.0.
 See LICENSE for details.
 

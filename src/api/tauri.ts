@@ -10,6 +10,7 @@ export interface ServerInfo {
   protocol: string;
   latency_ms: number | null;
   subscription_id: string | null;
+  favorite: boolean;
 }
 
 export interface StatusResponse {
@@ -78,6 +79,46 @@ export interface RoutingRule {
 export interface RoutingRulesResponse {
   rules: RoutingRule[];
   default_route: string;
+}
+
+export interface IpCheckResult {
+  ip: string;
+  country: string;
+  city: string;
+  lat: number;
+  lon: number;
+}
+
+export interface DnsLeakResult {
+  leaked: boolean;
+  dns_servers: string[];
+}
+
+export interface SpeedTestResult {
+  download_mbps: number;
+  upload_mbps: number;
+  ping_ms: number;
+}
+
+export interface UpdateCheckResult {
+  has_update: boolean;
+  latest_version: string;
+  current_version: string;
+  changelog: string;
+  download_url: string;
+}
+
+export interface DailyTraffic {
+  date: string;
+  upload: number;
+  download: number;
+}
+
+export interface ServerUsageStat {
+  server_name: string;
+  protocol: string;
+  connection_count: number;
+  total_traffic: number;
 }
 
 // ── API calls ──────────────────────────────────
@@ -158,4 +199,28 @@ export const api = {
   isAdmin: () => invoke<boolean>("is_admin"),
 
   restartAsAdmin: () => invoke<void>("restart_as_admin"),
+
+  // Privacy Shield
+  checkIp: () => invoke<IpCheckResult>("check_ip"),
+  checkDnsLeak: () => invoke<DnsLeakResult>("check_dns_leak"),
+
+  // Speed Test
+  runSpeedTest: () => invoke<SpeedTestResult>("run_speed_test"),
+
+  // Auto-Update
+  checkForUpdates: () => invoke<UpdateCheckResult>("check_for_updates"),
+
+  // Favorites
+  toggleFavorite: (serverId: string) =>
+    invoke<boolean>("toggle_favorite", { serverId }),
+
+  // Dashboard stats
+  getDailyTraffic: () => invoke<DailyTraffic[]>("get_daily_traffic"),
+  getServerUsageStats: () => invoke<ServerUsageStat[]>("get_server_usage_stats"),
+
+  // Android tile action
+  readTileAction: () => invoke<string | null>("read_tile_action"),
+
+  // Persisted active server
+  getActiveServerId: () => invoke<string | null>("get_active_server_id"),
 };

@@ -2,10 +2,12 @@ package com.horusvpn.nexvpn
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.service.quicksettings.TileService
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -191,6 +193,15 @@ class NexVpnService : VpnService() {
             statusFile.writeText(status)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write status: $e")
+        }
+        // Request Quick Settings Tile to update its state
+        try {
+            TileService.requestListeningState(
+                this,
+                ComponentName(this, VpnTileService::class.java)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to request tile update: $e")
         }
     }
 

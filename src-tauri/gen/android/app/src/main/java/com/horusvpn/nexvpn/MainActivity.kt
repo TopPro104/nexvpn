@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import java.io.File
@@ -14,6 +15,7 @@ class MainActivity : TauriActivity() {
     }
 
     private var pendingSocksPort: Int = 10808
+    private var launchedFromTile = false
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -30,11 +32,30 @@ class MainActivity : TauriActivity() {
     private var vpnCommandWatcher: Thread? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Detect tile launch BEFORE anything visual happens
+        launchedFromTile = intent?.getBooleanExtra("from_tile", false) == true
+
+        if (launchedFromTile) {
+            // Make window completely invisible
+            setTheme(R.style.Theme_nexvpn_Transparent)
+            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            window.setDimAmount(0f)
+        }
+
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        // If from tile, minimize immediately
+        if (launchedFromTile) {
+            moveTaskToBack(true)
+            overridePendingTransition(0, 0)
+        }
+
         // Handle deep link from cold start intent
         handleDeepLinkIntent(intent)
+
+        // Handle tile action from cold start
+        handleTileIntent(intent)
 
         // Write native library directory path for Rust to read
         val nativeLibDir = applicationInfo.nativeLibraryDir
@@ -51,6 +72,16 @@ class MainActivity : TauriActivity() {
 
         // Start watching for VPN commands from Rust
         startVpnCommandWatcher()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Double-check: if this was a tile launch, stay in background
+        if (launchedFromTile) {
+            moveTaskToBack(true)
+            // Reset flag so normal app resumes work correctly later
+            launchedFromTile = false
+        }
     }
 
     private fun startVpnCommandWatcher() {
@@ -158,7 +189,24 @@ class MainActivity : TauriActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+
+        // Check if this new intent is from tile
+        val fromTile = intent.getBooleanExtra("from_tile", false)
+        if (fromTile) {
+            // App was already running — just minimize and let frontend poll handle it
+            moveTaskToBack(true)
+        }
+
         handleDeepLinkIntent(intent)
+        handleTileIntent(intent)
+    }
+
+    private fun handleTileIntent(intent: Intent?) {
+        if (intent?.action != VpnTileService.ACTION_TILE) return
+        val action = intent.getStringExtra(VpnTileService.EXTRA_ACTION) ?: return
+        Log.i(TAG, "Tile action received: $action")
+        // .tile_action file was already written by TileService.
+        // Frontend polls it and handles connect/disconnect via proper Tauri IPC.
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {

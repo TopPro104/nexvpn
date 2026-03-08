@@ -289,14 +289,19 @@ impl CoreManager {
             .map(|s| PathBuf::from(s))
             .unwrap_or_else(|| self.config_dir.clone());
 
-        let cmd_path = base_dir.join("nexvpn/.vpn_command");
-        if let Some(parent) = cmd_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
+        let nexvpn_dir = base_dir.join("nexvpn");
+        std::fs::create_dir_all(&nexvpn_dir).ok();
+
+        let cmd_path = nexvpn_dir.join(".vpn_command");
         match std::fs::write(&cmd_path, command) {
             Ok(_) => log::info!("VPN signal '{}' written to {}", command, cmd_path.display()),
             Err(e) => log::error!("Failed to write VPN signal: {}", e),
         }
+
+        // Also write .vpn_status so the Quick Settings Tile can read the real state
+        let status = if command == "stop" { "stopped" } else { "running" };
+        let status_path = nexvpn_dir.join(".vpn_status");
+        std::fs::write(&status_path, status).ok();
     }
 
     // ── Logs ────────────────────────────────────────
