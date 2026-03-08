@@ -7,6 +7,8 @@ const translations = {
   "nav.stats": { en: "Statistics", ru: "Статистика" },
   "nav.logs": { en: "Logs", ru: "Логи" },
   "nav.routing": { en: "Routing", ru: "Маршруты" },
+  "nav.privacy": { en: "Privacy", ru: "Приватность" },
+  "nav.speedtest": { en: "Speed Test", ru: "Тест скорости" },
   "nav.settings": { en: "Settings", ru: "Настройки" },
 
   // Status
@@ -172,6 +174,76 @@ const translations = {
     ru: "Порты SOCKS и HTTP должны отличаться",
   },
   "toast.initFailed": { en: "Init failed", ru: "Не удалось инициализировать" },
+
+  // Privacy Shield
+  "privacy.title": { en: "Privacy Shield", ru: "Щит приватности" },
+  "privacy.score": { en: "Privacy Score", ru: "Оценка приватности" },
+  "privacy.runChecks": { en: "Run Checks", ru: "Запустить проверку" },
+  "privacy.running": { en: "Checking...", ru: "Проверяем..." },
+  "privacy.ipCheck": { en: "IP Address", ru: "IP адрес" },
+  "privacy.ipDesc": { en: "Your public IP address visible to websites", ru: "Ваш публичный IP, видимый сайтам" },
+  "privacy.dnsCheck": { en: "DNS Leak Test", ru: "Тест утечки DNS" },
+  "privacy.dnsDesc": { en: "Check if DNS requests leak outside VPN", ru: "Проверка утечки DNS-запросов мимо VPN" },
+  "privacy.encryption": { en: "Encryption", ru: "Шифрование" },
+  "privacy.encDesc": { en: "Traffic encryption status", ru: "Статус шифрования трафика" },
+  "privacy.killSwitch": { en: "VPN Mode", ru: "Режим VPN" },
+  "privacy.killDesc": { en: "Network protection level", ru: "Уровень защиты сети" },
+  "privacy.protected": { en: "Protected", ru: "Защищено" },
+  "privacy.exposed": { en: "Exposed", ru: "Не защищено" },
+  "privacy.encrypted": { en: "Encrypted", ru: "Зашифровано" },
+  "privacy.tunActive": { en: "TUN (Full Protection)", ru: "TUN (полная защита)" },
+  "privacy.proxyActive": { en: "Proxy Mode", ru: "Режим прокси" },
+  "privacy.connectFirst": { en: "Connect to VPN to run privacy checks", ru: "Подключитесь к VPN для проверки приватности" },
+  "privacy.noLeak": { en: "No DNS leak detected", ru: "Утечки DNS не обнаружено" },
+  "privacy.leakWarning": { en: "Possible DNS leak", ru: "Возможна утечка DNS" },
+
+  // Speed Test
+  "speedtest.title": { en: "Speed Test", ru: "Тест скорости" },
+  "speedtest.start": { en: "Start Test", ru: "Начать тест" },
+  "speedtest.testing": { en: "Testing...", ru: "Тестируем..." },
+  "speedtest.download": { en: "Download", ru: "Загрузка" },
+  "speedtest.upload": { en: "Upload", ru: "Выгрузка" },
+  "speedtest.ping": { en: "Ping", ru: "Пинг" },
+  "speedtest.mbps": { en: "Mbps", ru: "Мбит/с" },
+  "speedtest.ms": { en: "ms", ru: "мс" },
+  "speedtest.history": { en: "Test History", ru: "История тестов" },
+  "speedtest.noHistory": { en: "No tests yet. Run a speed test to see results.", ru: "Тестов пока нет. Запустите тест скорости." },
+  "speedtest.connectFirst": { en: "Connect to VPN to test speed", ru: "Подключитесь к VPN для теста скорости" },
+
+  // Dashboard (enhanced stats)
+  "stats.dashboard": { en: "Dashboard", ru: "Дашборд" },
+  "stats.dailyTraffic": { en: "Daily Traffic (7 days)", ru: "Трафик по дням (7 дней)" },
+  "stats.topServers": { en: "Top Servers", ru: "Топ серверов" },
+  "stats.protocols": { en: "Protocol Distribution", ru: "Протоколы" },
+  "stats.protocolMix": { en: "Protocols", ru: "Протоколы" },
+  "stats.connections": { en: "connections", ru: "подключений" },
+
+  // Server list extras
+  "servers.favorites": { en: "Favorites", ru: "Избранные" },
+  "servers.sortCountry": { en: "By country", ru: "По стране" },
+  "servers.gridView": { en: "Grid view", ru: "Сетка" },
+  "servers.listView": { en: "List view", ru: "Список" },
+
+  // Auto-update
+  "update.title": { en: "Updates", ru: "Обновления" },
+  "update.check": { en: "Check for Updates", ru: "Проверить обновления" },
+  "update.checking": { en: "Checking...", ru: "Проверяем..." },
+  "update.available": { en: "Update Available", ru: "Доступно обновление" },
+  "update.upToDate": { en: "You're up to date!", ru: "У вас последняя версия!" },
+  "update.current": { en: "Current", ru: "Текущая" },
+  "update.latest": { en: "Latest", ru: "Последняя" },
+  "update.download": { en: "Download Update", ru: "Скачать обновление" },
+  "update.changelog": { en: "Changelog", ru: "Изменения" },
+  "update.error": { en: "Failed to check for updates", ru: "Не удалось проверить обновления" },
+  "update.devHint": { en: "Development build — ahead of public release", ru: "Dev-сборка — впереди публичного релиза" },
+
+  // Quick Connect
+  "quick.recent": { en: "Recent", ru: "Недавние" },
+  "quick.fastest": { en: "Fastest", ru: "Быстрейший" },
+
+  // Connection Info
+  "connInfo.time": { en: "Time", ru: "Время" },
+  "connInfo.mode": { en: "Mode", ru: "Режим" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

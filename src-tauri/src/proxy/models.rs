@@ -81,6 +81,8 @@ pub struct Server {
     // Metadata
     pub subscription_id: Option<String>,
     pub latency_ms: Option<u32>,
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// A subscription source

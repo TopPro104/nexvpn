@@ -30,12 +30,14 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
             "type": "tun",
             "tag": "tun-in",
             "address": [
-                "172.19.0.1/30",
-                "fdfe:dcba:9876::1/126"
+                "172.19.0.1/28",
+                "fdfe:dcba:9876::1/124"
             ],
+            "mtu": 9000,
             "auto_route": true,
             "strict_route": false,
             "stack": "mixed",
+            "udp_timeout": "5m",
             "endpoint_independent_nat": true
         }));
     }
@@ -86,11 +88,19 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
 
     // Route rules (sniff + DNS hijack, same approach as NekoRay)
     let mut route_rules: Vec<Value> = vec![
-        json!({ "action": "sniff" }),
+        json!({ "action": "sniff", "timeout": "300ms" }),
         json!({ "protocol": "dns", "action": "hijack-dns" }),
     ];
 
     if tun_mode {
+        // Block QUIC — forces YouTube, Discord, Roblox etc. to fall back to TCP.
+        // sing-box cannot properly sniff QUIC with fragmented ClientHello (#1724),
+        // and UDP:443 packets on Windows can bypass TUN routing (#2655).
+        route_rules.push(json!({
+            "protocol": "quic",
+            "action": "reject"
+        }));
+
         // Block multicast, NetBIOS, mDNS — they shouldn't go through proxy
         route_rules.push(json!({
             "network": "udp",

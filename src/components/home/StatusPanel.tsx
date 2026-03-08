@@ -11,17 +11,15 @@ export function StatusPanel() {
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
-  // Calculate elapsed from global connectedAt timestamp — survives page switches
   useEffect(() => {
     if (!state.connectedAt) {
       setElapsed(0);
       return;
     }
-
     const tick = () => {
       setElapsed(Math.floor((Date.now() - state.connectedAt!) / 1000));
     };
-    tick(); // immediate update
+    tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [state.connectedAt]);
@@ -62,7 +60,7 @@ export function StatusPanel() {
   );
 
   return (
-    <div className="status-panel">
+    <div className={`status-panel ${state.connected ? "connected-particles" : ""}`}>
       <button
         className={`connect-btn ${state.connected ? "connected" : ""} ${loading ? "loading" : ""}`}
         onClick={handleToggle}
@@ -90,15 +88,33 @@ export function StatusPanel() {
             {selectedServer.name} ({selectedServer.protocol})
           </div>
         )}
-        {state.connected && (
-          <div className="status-time">{formatTime(elapsed)}</div>
+        {state.connected ? (
+          <div className="connection-info-bar">
+            <span className="info-chip">
+              <span className="info-chip-label">{t("connInfo.time")}</span>
+              {formatTime(elapsed)}
+            </span>
+            {selectedServer && (
+              <span className="info-chip proto">
+                {selectedServer.protocol.toUpperCase()}
+              </span>
+            )}
+            <span className="info-chip">
+              <span className="info-chip-label">{t("connInfo.mode")}</span>
+              {state.settings.vpn_mode === "tun" ? "TUN" : "Proxy"}
+            </span>
+            <span className="info-chip">
+              {state.coreType}
+            </span>
+          </div>
+        ) : (
+          <div className="status-core">
+            {state.coreType} | SOCKS:{state.socksPort} HTTP:{state.httpPort}
+            <span className={`vpn-mode-badge ${state.settings.vpn_mode}`}>
+              {state.settings.vpn_mode === "tun" ? "TUN" : "Proxy"}
+            </span>
+          </div>
         )}
-        <div className="status-core">
-          {state.coreType} | SOCKS:{state.socksPort} HTTP:{state.httpPort}
-          <span className={`vpn-mode-badge ${state.settings.vpn_mode}`}>
-            {state.settings.vpn_mode === "tun" ? "TUN" : "Proxy"}
-          </span>
-        </div>
       </div>
     </div>
   );

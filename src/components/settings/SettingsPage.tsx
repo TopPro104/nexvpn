@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { api, Settings, DeviceInfo } from "../../api/tauri";
 import { ThemePicker } from "./ThemePicker";
+import { UpdateChecker } from "./UpdateChecker";
 import { t, setLang, Lang } from "../../i18n/translations";
 import { useState } from "react";
 
@@ -77,10 +78,8 @@ export function SettingsPage() {
     }
   };
 
-  return (
-    <div className="settings-page">
-      <h2>{t("settings.title")}</h2>
-
+  const renderStyle = () => (
+    <>
       <div className="settings-section">
         <div className="settings-label">{t("settings.theme")}</div>
         <ThemePicker
@@ -129,6 +128,34 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.language")}</div>
+        <div className="core-radio-group">
+          <label className={`core-radio ${state.settings.language === "en" ? "active" : ""}`}>
+            <input
+              type="radio"
+              name="lang"
+              checked={state.settings.language === "en"}
+              onChange={() => update("language", "en")}
+            />
+            <span>English</span>
+          </label>
+          <label className={`core-radio ${state.settings.language === "ru" ? "active" : ""}`}>
+            <input
+              type="radio"
+              name="lang"
+              checked={state.settings.language === "ru"}
+              onChange={() => update("language", "ru")}
+            />
+            <span>Русский</span>
+          </label>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderVpn = () => (
+    <>
       <div className="settings-section">
         <div className="settings-label">{t("settings.core")}</div>
         <div className="core-radio-group">
@@ -202,6 +229,62 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-section">
+        <div className="settings-label">{t("settings.ports")}</div>
+        <div className="port-inputs">
+          <div className="form-group inline">
+            <label className="form-label">SOCKS</label>
+            <input
+              className="form-input small"
+              type="number"
+              min={1}
+              max={65535}
+              value={state.settings.socks_port}
+              onChange={(e) => update("socks_port", parseInt(e.target.value) || 0)}
+            />
+          </div>
+          <div className="form-group inline">
+            <label className="form-label">HTTP</label>
+            <input
+              className="form-input small"
+              type="number"
+              min={1}
+              max={65535}
+              value={state.settings.http_port}
+              onChange={(e) => update("http_port", parseInt(e.target.value) || 0)}
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderOther = () => (
+    <>
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.autoConnect")}</div>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={state.settings.auto_connect}
+            onChange={(e) => update("auto_connect", e.target.checked)}
+          />
+          <span className="toggle-slider" />
+        </label>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.autoReconnect")}</div>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={state.settings.auto_reconnect}
+            onChange={(e) => update("auto_reconnect", e.target.checked)}
+          />
+          <span className="toggle-slider" />
+        </label>
+      </div>
+
+      <div className="settings-section">
         <div className="settings-label">{t("settings.hwid")}</div>
         <label className="toggle">
           <input
@@ -245,81 +328,16 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-section">
-        <div className="settings-label">{t("settings.ports")}</div>
-        <div className="port-inputs">
-          <div className="form-group inline">
-            <label className="form-label">SOCKS</label>
-            <input
-              className="form-input small"
-              type="number"
-              min={1}
-              max={65535}
-              value={state.settings.socks_port}
-              onChange={(e) => update("socks_port", parseInt(e.target.value) || 0)}
-            />
-          </div>
-          <div className="form-group inline">
-            <label className="form-label">HTTP</label>
-            <input
-              className="form-input small"
-              type="number"
-              min={1}
-              max={65535}
-              value={state.settings.http_port}
-              onChange={(e) => update("http_port", parseInt(e.target.value) || 0)}
-            />
-          </div>
-        </div>
+        <UpdateChecker />
       </div>
+    </>
+  );
 
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.autoConnect")}</div>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={state.settings.auto_connect}
-            onChange={(e) => update("auto_connect", e.target.checked)}
-          />
-          <span className="toggle-slider" />
-        </label>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.autoReconnect")}</div>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={state.settings.auto_reconnect}
-            onChange={(e) => update("auto_reconnect", e.target.checked)}
-          />
-          <span className="toggle-slider" />
-        </label>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-label">{t("settings.language")}</div>
-        <div className="core-radio-group">
-          <label className={`core-radio ${state.settings.language === "en" ? "active" : ""}`}>
-            <input
-              type="radio"
-              name="lang"
-              checked={state.settings.language === "en"}
-              onChange={() => update("language", "en")}
-            />
-            <span>English</span>
-          </label>
-          <label className={`core-radio ${state.settings.language === "ru" ? "active" : ""}`}>
-            <input
-              type="radio"
-              name="lang"
-              checked={state.settings.language === "ru"}
-              onChange={() => update("language", "ru")}
-            />
-            <span>Русский</span>
-          </label>
-        </div>
-      </div>
-
+  return (
+    <div className="settings-page">
+      {state.settingsTab === "style" && renderStyle()}
+      {state.settingsTab === "vpn" && renderVpn()}
+      {state.settingsTab === "other" && renderOther()}
     </div>
   );
 }

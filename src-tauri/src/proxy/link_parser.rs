@@ -127,6 +127,7 @@ fn parse_vless(link: &str) -> Result<Server> {
         tls,
         subscription_id: None,
         latency_ms: None,
+        favorite: false,
     })
 }
 
@@ -200,6 +201,7 @@ fn parse_vmess(link: &str) -> Result<Server> {
         tls,
         subscription_id: None,
         latency_ms: None,
+        favorite: false,
     })
 }
 
@@ -271,6 +273,7 @@ fn make_ss_server(name: String, address: String, port: u16, method: String, pass
         tls: TlsSettings::default(),
         subscription_id: None,
         latency_ms: None,
+        favorite: false,
     }
 }
 
@@ -331,6 +334,7 @@ fn parse_trojan(link: &str) -> Result<Server> {
         tls,
         subscription_id: None,
         latency_ms: None,
+        favorite: false,
     })
 }
 

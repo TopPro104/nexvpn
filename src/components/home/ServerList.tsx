@@ -1,24 +1,55 @@
-import { useState } from "react";
-import { useApp } from "../../context/AppContext";
-import { api } from "../../api/tauri";
+import { useState, useMemo } from "react";
+import { useApp, SortKey, ViewMode } from "../../context/AppContext";
+import { api, ServerInfo } from "../../api/tauri";
 import { ServerCard } from "./ServerCard";
 import { Button } from "../ui/Button";
 import { Spinner } from "../ui/Spinner";
 import { t } from "../../i18n/translations";
+import { extractCountryCode } from "../../utils/countryUtils";
+import { GridIcon, ListIcon } from "../ui/Icons";
 
-type SortKey = "name" | "ping" | "protocol";
+const COUNTRY_FLAGS: Record<string, string> = {
+  us: "\u{1F1FA}\u{1F1F8}", gb: "\u{1F1EC}\u{1F1E7}", de: "\u{1F1E9}\u{1F1EA}",
+  nl: "\u{1F1F3}\u{1F1F1}", fr: "\u{1F1EB}\u{1F1F7}", jp: "\u{1F1EF}\u{1F1F5}",
+  sg: "\u{1F1F8}\u{1F1EC}", ru: "\u{1F1F7}\u{1F1FA}", tr: "\u{1F1F9}\u{1F1F7}",
+  ca: "\u{1F1E8}\u{1F1E6}", au: "\u{1F1E6}\u{1F1FA}", hk: "\u{1F1ED}\u{1F1F0}",
+  kr: "\u{1F1F0}\u{1F1F7}", in: "\u{1F1EE}\u{1F1F3}", br: "\u{1F1E7}\u{1F1F7}",
+  it: "\u{1F1EE}\u{1F1F9}", es: "\u{1F1EA}\u{1F1F8}", se: "\u{1F1F8}\u{1F1EA}",
+  ch: "\u{1F1E8}\u{1F1ED}", fi: "\u{1F1EB}\u{1F1EE}", no: "\u{1F1F3}\u{1F1F4}",
+  pl: "\u{1F1F5}\u{1F1F1}", ua: "\u{1F1FA}\u{1F1E6}", il: "\u{1F1EE}\u{1F1F1}",
+  tw: "\u{1F1F9}\u{1F1FC}", ie: "\u{1F1EE}\u{1F1EA}", at: "\u{1F1E6}\u{1F1F9}",
+  be: "\u{1F1E7}\u{1F1EA}", cz: "\u{1F1E8}\u{1F1FF}", dk: "\u{1F1E9}\u{1F1F0}",
+  ro: "\u{1F1F7}\u{1F1F4}", bg: "\u{1F1E7}\u{1F1EC}", hu: "\u{1F1ED}\u{1F1FA}",
+  pt: "\u{1F1F5}\u{1F1F9}", ae: "\u{1F1E6}\u{1F1EA}", za: "\u{1F1FF}\u{1F1E6}",
+  mx: "\u{1F1F2}\u{1F1FD}", ar: "\u{1F1E6}\u{1F1F7}", kz: "\u{1F1F0}\u{1F1FF}",
+};
+
+const COUNTRY_NAMES: Record<string, string> = {
+  us: "United States", gb: "United Kingdom", de: "Germany", nl: "Netherlands",
+  fr: "France", jp: "Japan", sg: "Singapore", ru: "Russia", tr: "Turkey",
+  ca: "Canada", au: "Australia", hk: "Hong Kong", kr: "South Korea",
+  in: "India", br: "Brazil", it: "Italy", es: "Spain", se: "Sweden",
+  ch: "Switzerland", fi: "Finland", no: "Norway", pl: "Poland", ua: "Ukraine",
+  il: "Israel", tw: "Taiwan", ie: "Ireland", at: "Austria", be: "Belgium",
+  cz: "Czechia", dk: "Denmark", ro: "Romania", bg: "Bulgaria", hu: "Hungary",
+  pt: "Portugal", ae: "UAE", za: "South Africa", mx: "Mexico", ar: "Argentina",
+  kz: "Kazakhstan",
+};
 
 export function ServerList() {
   const { state, dispatch, toast } = useApp();
   void state.langTick;
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<SortKey>("name");
+  const { search, tab, sortBy, viewMode } = state.serverListUI;
+  const setSearch = (v: string) => dispatch({ type: "SET_SERVER_LIST_UI", ui: { search: v } });
+  const setTab = (v: string) => dispatch({ type: "SET_SERVER_LIST_UI", ui: { tab: v } });
+  const setSortBy = (v: SortKey) => dispatch({ type: "SET_SERVER_LIST_UI", ui: { sortBy: v } });
+  const setViewMode = (v: ViewMode) => dispatch({ type: "SET_SERVER_LIST_UI", ui: { viewMode: v } });
   const [pinging, setPinging] = useState(false);
   const [autoSelecting, setAutoSelecting] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
   const [importLoading, setImportLoading] = useState(false);
+  const [collapsedCountries, setCollapsedCountries] = useState<Set<string>>(new Set());
 
   const filtered = state.servers.filter((s) => {
     const matchSearch =
@@ -31,15 +62,56 @@ export function ServerList() {
     return matchSearch && matchTab;
   });
 
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortBy === "ping") {
-      const ap = a.latency_ms ?? 99999;
-      const bp = b.latency_ms ?? 99999;
-      return ap - bp;
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      // Favorites always first
+      if (a.favorite && !b.favorite) return -1;
+      if (!a.favorite && b.favorite) return 1;
+
+      if (sortBy === "ping") {
+        return (a.latency_ms ?? 99999) - (b.latency_ms ?? 99999);
+      }
+      if (sortBy === "protocol") return a.protocol.localeCompare(b.protocol);
+      if (sortBy === "country") {
+        const ca = extractCountryCode(a.name) || "zz";
+        const cb = extractCountryCode(b.name) || "zz";
+        return ca.localeCompare(cb);
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return arr;
+  }, [filtered, sortBy]);
+
+  // Group by country when sorting by country
+  const groupedByCountry = useMemo(() => {
+    if (sortBy !== "country") return null;
+    const groups: { code: string; name: string; flag: string; servers: ServerInfo[] }[] = [];
+    const map = new Map<string, ServerInfo[]>();
+    for (const s of sorted) {
+      const code = extractCountryCode(s.name) || "other";
+      if (!map.has(code)) map.set(code, []);
+      map.get(code)!.push(s);
     }
-    if (sortBy === "protocol") return a.protocol.localeCompare(b.protocol);
-    return a.name.localeCompare(b.name);
-  });
+    for (const [code, servers] of map) {
+      groups.push({
+        code,
+        name: COUNTRY_NAMES[code] || code.toUpperCase(),
+        flag: COUNTRY_FLAGS[code] || "\u{1F30D}",
+        servers,
+      });
+    }
+    return groups;
+  }, [sorted, sortBy]);
+
+  const toggleCountry = (code: string) => {
+    setCollapsedCountries(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  };
 
   const tabs: { id: string; label: string }[] = [
     { id: "all", label: `${t("servers.all")} (${state.servers.length})` },
@@ -110,6 +182,22 @@ export function ServerList() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <div className="server-list-actions">
+          <div className="view-toggle">
+            <button
+              className={`view-toggle-btn ${viewMode === "list" ? "active" : ""}`}
+              onClick={() => setViewMode("list")}
+              title="List"
+            >
+              <ListIcon size={14} />
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === "grid" ? "active" : ""}`}
+              onClick={() => setViewMode("grid")}
+              title="Grid"
+            >
+              <GridIcon size={14} />
+            </button>
+          </div>
           <select
             className="sort-select"
             value={sortBy}
@@ -118,6 +206,7 @@ export function ServerList() {
             <option value="name">{t("servers.sortName")}</option>
             <option value="ping">{t("servers.sortPing")}</option>
             <option value="protocol">{t("servers.sortProto")}</option>
+            <option value="country">{t("servers.sortCountry")}</option>
           </select>
           <Button variant="secondary" size="sm" onClick={() => setShowImport(!showImport)}>
             {t("servers.import")}
@@ -151,25 +240,36 @@ export function ServerList() {
         </div>
       )}
 
-      <div className="server-tabs">
-        {tabs.map((tt) => (
-          <button
-            key={tt.id}
-            className={`tab-btn ${tab === tt.id ? "active" : ""}`}
-            onClick={() => setTab(tt.id)}
-          >
-            {tt.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="server-list-items">
+      <div className={`server-list-items ${viewMode === "grid" ? "grid-view" : ""}`}>
         {filtered.length === 0 ? (
           <div className="empty-list">
             {state.servers.length === 0 ? t("servers.empty") : t("servers.noMatch")}
           </div>
+        ) : groupedByCountry ? (
+          groupedByCountry.map((group) => (
+            <div key={group.code} className="country-group">
+              <div
+                className="country-group-header"
+                onClick={() => toggleCountry(group.code)}
+              >
+                <span className="country-flag">{group.flag}</span>
+                <span className="country-name">{group.name}</span>
+                <span className="country-count">{group.servers.length}</span>
+                <span className={`country-chevron ${collapsedCountries.has(group.code) ? "collapsed" : ""}`}>
+                  &#9660;
+                </span>
+              </div>
+              {!collapsedCountries.has(group.code) && (
+                <div className="country-group-servers">
+                  {group.servers.map((s) => (
+                    <ServerCard key={s.id} server={s} compact={viewMode === "grid"} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))
         ) : (
-          sorted.map((s) => <ServerCard key={s.id} server={s} />)
+          sorted.map((s) => <ServerCard key={s.id} server={s} compact={viewMode === "grid"} />)
         )}
       </div>
     </div>

@@ -32,9 +32,20 @@ export function LogsPage() {
     }
   }, [logs, autoScroll]);
 
+  // Apply top-bar level filter
+  let levelFiltered = logs;
+  if (state.logsFilter === "errors") {
+    levelFiltered = logs.filter((l) => {
+      const lower = l.toLowerCase();
+      return lower.includes("error") || lower.includes("fatal");
+    });
+  } else if (state.logsFilter === "warnings") {
+    levelFiltered = logs.filter((l) => l.toLowerCase().includes("warn"));
+  }
+
   const filtered = filter
-    ? logs.filter((l) => l.toLowerCase().includes(filter.toLowerCase()))
-    : logs;
+    ? levelFiltered.filter((l) => l.toLowerCase().includes(filter.toLowerCase()))
+    : levelFiltered;
 
   const handleClear = async () => {
     await api.clearLogs();
