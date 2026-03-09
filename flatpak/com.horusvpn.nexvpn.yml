@@ -17,8 +17,8 @@ finish-args:
   - --device=dri
   # Wayland primary display
   - --socket=wayland
-  # X11 fallback
-  - --socket=fallback-x11
+  # X11 socket — always expose so GDK_BACKEND=x11 works even on Wayland sessions
+  - --socket=x11
   # Shared memory — required for X11 MIT-SHM
   - --share=ipc
   # Open URLs in browser (subscription imports, deep links nexvpn://)
