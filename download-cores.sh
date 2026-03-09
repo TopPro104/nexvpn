@@ -107,7 +107,7 @@ if [ "$SB_EXT" = "zip" ]; then
     unzip -q -o "$SB_ARCHIVE" -d "$TMPDIR/singbox"
 else
     mkdir -p "$TMPDIR/singbox"
-    tar xzf "$SB_ARCHIVE" -C "$TMPDIR/singbox"
+    tar xzf "$SB_ARCHIVE" -C "$TMPDIR/singbox" --no-same-owner
 fi
 
 # Find the binary inside extracted dir
