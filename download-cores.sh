@@ -13,7 +13,14 @@ set -euo pipefail
 SINGBOX_VERSION="1.12.18"
 XRAY_VERSION="26.2.2"
 
-BINDIR="$(cd "$(dirname "$0")" && pwd)/binaries"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# If running from project root (src-tauri/ sibling exists), put binaries
+# where Tauri expects them: src-tauri/binaries/
+if [ -d "$SCRIPT_DIR/src-tauri" ]; then
+    BINDIR="$SCRIPT_DIR/src-tauri/binaries"
+else
+    BINDIR="$SCRIPT_DIR/binaries"
+fi
 mkdir -p "$BINDIR"
 
 # Auto-detect target triple
