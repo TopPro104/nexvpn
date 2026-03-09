@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=NexVPN
+Comment=Open-source VPN client with multi-protocol support
+Exec=nexvpn %u
+Icon=com.horusvpn.nexvpn
+Terminal=false
+Type=Application
+Categories=Network;VPN;Security;
+Keywords=vpn;proxy;singbox;xray;vless;vmess;trojan;shadowsocks;
+MimeType=x-scheme-handler/nexvpn;
+StartupNotify=true
+StartupWMClass=NexVPN

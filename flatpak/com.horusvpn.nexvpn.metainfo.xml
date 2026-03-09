@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.horusvpn.nexvpn</id>
+  <name>NexVPN</name>
+  <summary>Open-source VPN client with multi-protocol support</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      NexVPN is a modern, open-source VPN client supporting multiple protocols
+      including VLESS, VMess, Trojan, Shadowsocks, Hysteria2, and TUIC.
+      It features dual-core support (sing-box and xray-core), subscription management,
+      smart routing rules, and a beautiful adaptive UI with 7 themes.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Multi-protocol support: VLESS, VMess, Trojan, Shadowsocks, Hysteria2, TUIC</li>
+      <li>Dual core: sing-box and xray-core with runtime switching</li>
+      <li>TUN mode for system-wide VPN</li>
+      <li>Subscription management with deep links</li>
+      <li>Smart routing rules (proxy/direct/block per domain)</li>
+      <li>Speed test, privacy shield, connection history</li>
+      <li>7 built-in themes with smooth animations</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://github.com/TopPro104/nexvpn</url>
+  <url type="bugtracker">https://github.com/TopPro104/nexvpn/issues</url>
+
+  <launchable type="desktop-id">com.horusvpn.nexvpn.desktop</launchable>
+
+  <provides>
+    <binary>nexvpn</binary>
+  </provides>
+
+  <content_rating type="oarn-1.1" />
+
+  <releases>
+    <release version="1.4.0" date="2026-03-08">
+      <description>
+        <p>v2 UI redesign, Android Quick Settings Tile, mobile responsive layout, 7 themes.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,82 @@
+app-id: com.horusvpn.nexvpn
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+
+command: nexvpn-wrapper
+
+finish-args:
+  # Network access (required for VPN)
+  - --share=network
+  # TUN device for VPN tunnel mode; also covers /dev/dri for GPU acceleration
+  - --device=all
+  # GPU acceleration for WebKitGTK (explicit, redundant with device=all but documents intent)
+  - --device=dri
+  # Wayland primary display
+  - --socket=wayland
+  # X11 fallback
+  - --socket=fallback-x11
+  # Shared memory — required for X11 MIT-SHM
+  - --share=ipc
+  # Open URLs in browser (subscription imports, deep links nexvpn://)
+  - --talk-name=org.freedesktop.portal.Desktop
+  # Desktop notifications (VPN connection status)
+  - --talk-name=org.freedesktop.Notifications
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+  env:
+    CARGO_HOME: /run/build/nexvpn/cargo
+
+modules:
+  - name: nexvpn
+    buildsystem: simple
+    build-commands:
+      # Install npm dependencies
+      - npm ci --ignore-scripts
+
+      # Determine Rust target triple from Flatpak architecture
+      - |
+        case "$FLATPAK_ARCH" in
+          x86_64)  echo "x86_64-unknown-linux-gnu"  > /tmp/rust_target ;;
+          aarch64) echo "aarch64-unknown-linux-gnu" > /tmp/rust_target ;;
+          *) echo "Unsupported arch: $FLATPAK_ARCH" && exit 1 ;;
+        esac
+
+      # Download Linux cores (sing-box + xray) for detected arch
+      - bash download-cores.sh "$(cat /tmp/rust_target)"
+
+      # Build frontend
+      - npm run build
+
+      # Build Tauri (Rust backend)
+      - cd src-tauri && cargo build --release
+
+      # Install main binary
+      - install -Dm755 src-tauri/target/release/nexvpn /app/bin/nexvpn
+
+      # Install sidecar binaries (sing-box + xray cores)
+      - install -Dm755 "src-tauri/binaries/sing-box-$(cat /tmp/rust_target)" /app/bin/sing-box
+      - install -Dm755 "src-tauri/binaries/xray-$(cat /tmp/rust_target)" /app/bin/xray
+
+      # Install wrapper script
+      - install -Dm755 flatpak/nexvpn-wrapper.sh /app/bin/nexvpn-wrapper
+
+      # Install desktop entry
+      - install -Dm644 flatpak/com.horusvpn.nexvpn.desktop /app/share/applications/com.horusvpn.nexvpn.desktop
+
+      # Install AppStream metadata
+      - install -Dm644 flatpak/com.horusvpn.nexvpn.metainfo.xml /app/share/metainfo/com.horusvpn.nexvpn.metainfo.xml
+
+      # Install icons at multiple sizes
+      - install -Dm644 src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/com.horusvpn.nexvpn.png
+      - install -Dm644 src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/com.horusvpn.nexvpn.png
+      - install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.horusvpn.nexvpn.png
+      - install -Dm644 src-tauri/icons/icon.png /app/share/icons/hicolor/256x256/apps/com.horusvpn.nexvpn.png
+
+    sources:
+      - type: dir
+        path: ..
