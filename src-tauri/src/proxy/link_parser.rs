@@ -68,6 +68,8 @@ fn parse_vless(link: &str) -> Result<Server> {
         Some("grpc") => Transport::Grpc,
         Some("http") => Transport::Http,
         Some("quic") => Transport::Quic,
+        Some("xhttp") | Some("splithttp") => Transport::Xhttp,
+        Some("httpupgrade") => Transport::Httpupgrade,
         _ => Transport::Tcp,
     };
 
@@ -83,6 +85,25 @@ fn parse_vless(link: &str) -> Result<Server> {
     let grpc = if transport == Transport::Grpc {
         Some(GrpcSettings {
             service_name: params.get("serviceName").unwrap_or_default(),
+        })
+    } else {
+        None
+    };
+
+    let xhttp = if transport == Transport::Xhttp {
+        Some(XhttpSettings {
+            path: params.get("path").unwrap_or_else(|| "/".to_string()),
+            host: params.get("host"),
+            mode: params.get("mode"),
+        })
+    } else {
+        None
+    };
+
+    let httpupgrade = if transport == Transport::Httpupgrade {
+        Some(HttpupgradeSettings {
+            path: params.get("path").unwrap_or_else(|| "/".to_string()),
+            host: params.get("host"),
         })
     } else {
         None
@@ -124,6 +145,8 @@ fn parse_vless(link: &str) -> Result<Server> {
         transport,
         ws,
         grpc,
+        xhttp,
+        httpupgrade,
         tls,
         subscription_id: None,
         latency_ms: None,
@@ -162,6 +185,8 @@ fn parse_vmess(link: &str) -> Result<Server> {
         "grpc" => Transport::Grpc,
         "h2" | "http" => Transport::Http,
         "quic" => Transport::Quic,
+        "xhttp" | "splithttp" => Transport::Xhttp,
+        "httpupgrade" => Transport::Httpupgrade,
         _ => Transport::Tcp,
     };
 
@@ -198,6 +223,8 @@ fn parse_vmess(link: &str) -> Result<Server> {
         transport,
         ws,
         grpc: None,
+        xhttp: None,
+        httpupgrade: None,
         tls,
         subscription_id: None,
         latency_ms: None,
@@ -270,6 +297,8 @@ fn make_ss_server(name: String, address: String, port: u16, method: String, pass
         transport: Transport::Tcp,
         ws: None,
         grpc: None,
+        xhttp: None,
+        httpupgrade: None,
         tls: TlsSettings::default(),
         subscription_id: None,
         latency_ms: None,
@@ -293,6 +322,8 @@ fn parse_trojan(link: &str) -> Result<Server> {
     let transport = match params.get("type").as_deref() {
         Some("ws") => Transport::Ws,
         Some("grpc") => Transport::Grpc,
+        Some("xhttp") | Some("splithttp") => Transport::Xhttp,
+        Some("httpupgrade") => Transport::Httpupgrade,
         _ => Transport::Tcp,
     };
 
@@ -331,6 +362,8 @@ fn parse_trojan(link: &str) -> Result<Server> {
         transport,
         ws,
         grpc: None,
+        xhttp: None,
+        httpupgrade: None,
         tls,
         subscription_id: None,
         latency_ms: None,
@@ -382,6 +415,139 @@ fn parse_host_port(s: &str) -> Result<(String, u16)> {
     } else {
         Err(anyhow!("Cannot parse host:port from '{}'", s))
     }
+}
+
+/// Convert a Server back into a shareable protocol link
+pub fn server_to_link(server: &Server) -> String {
+    match server.protocol {
+        Protocol::Vless => {
+            let uuid = server.uuid.as_deref().unwrap_or("");
+            let mut params = vec![];
+
+            // Transport
+            let transport_type = match server.transport {
+                Transport::Ws => "ws",
+                Transport::Grpc => "grpc",
+                Transport::Http => "http",
+                Transport::Quic => "quic",
+                Transport::Xhttp => "xhttp",
+                Transport::Httpupgrade => "httpupgrade",
+                Transport::Tcp => "tcp",
+            };
+            params.push(format!("type={}", transport_type));
+
+            if let Some(ws) = &server.ws {
+                params.push(format!("path={}", percent_encode(&ws.path)));
+                if let Some(host) = &ws.host {
+                    params.push(format!("host={}", host));
+                }
+            }
+            if let Some(grpc) = &server.grpc {
+                params.push(format!("serviceName={}", grpc.service_name));
+            }
+            if let Some(xhttp) = &server.xhttp {
+                params.push(format!("path={}", percent_encode(&xhttp.path)));
+                if let Some(host) = &xhttp.host {
+                    params.push(format!("host={}", host));
+                }
+                if let Some(mode) = &xhttp.mode {
+                    params.push(format!("mode={}", mode));
+                }
+            }
+            if let Some(hu) = &server.httpupgrade {
+                params.push(format!("path={}", percent_encode(&hu.path)));
+                if let Some(host) = &hu.host {
+                    params.push(format!("host={}", host));
+                }
+            }
+
+            // TLS
+            if server.tls.enabled {
+                if server.tls.reality.is_some() {
+                    params.push("security=reality".to_string());
+                    let r = server.tls.reality.as_ref().unwrap();
+                    params.push(format!("pbk={}", r.public_key));
+                    params.push(format!("sid={}", r.short_id));
+                } else {
+                    params.push("security=tls".to_string());
+                }
+                if let Some(sni) = &server.tls.server_name {
+                    params.push(format!("sni={}", sni));
+                }
+                if let Some(fp) = &server.tls.fingerprint {
+                    params.push(format!("fp={}", fp));
+                }
+                if !server.tls.alpn.is_empty() {
+                    params.push(format!("alpn={}", server.tls.alpn.join(",")));
+                }
+            }
+
+            if let Some(flow) = &server.flow {
+                if !flow.is_empty() {
+                    params.push(format!("flow={}", flow));
+                }
+            }
+
+            let name = percent_encode(&server.name);
+            format!("vless://{}@{}:{}?{}#{}", uuid, server.address, server.port, params.join("&"), name)
+        }
+        Protocol::Vmess => {
+            let obj = serde_json::json!({
+                "v": "2",
+                "ps": server.name,
+                "add": server.address,
+                "port": server.port,
+                "id": server.uuid.as_deref().unwrap_or(""),
+                "aid": server.alter_id.unwrap_or(0),
+                "net": match server.transport {
+                    Transport::Ws => "ws",
+                    Transport::Grpc => "grpc",
+                    Transport::Http => "h2",
+                    Transport::Xhttp => "xhttp",
+                    Transport::Httpupgrade => "httpupgrade",
+                    _ => "tcp",
+                },
+                "type": "none",
+                "host": server.ws.as_ref().and_then(|w| w.host.as_deref()).unwrap_or(""),
+                "path": server.ws.as_ref().map(|w| w.path.as_str()).unwrap_or(""),
+                "tls": if server.tls.enabled { "tls" } else { "" },
+                "sni": server.tls.server_name.as_deref().unwrap_or(""),
+            });
+            format!("vmess://{}", general_purpose::STANDARD.encode(obj.to_string()))
+        }
+        Protocol::Shadowsocks => {
+            let method = server.method.as_deref().unwrap_or("aes-256-gcm");
+            let password = server.password.as_deref().unwrap_or("");
+            let user_info = general_purpose::STANDARD.encode(format!("{}:{}", method, password));
+            let name = percent_encode(&server.name);
+            format!("ss://{}@{}:{}#{}", user_info, server.address, server.port, name)
+        }
+        Protocol::Trojan => {
+            let password = server.password.as_deref().unwrap_or("");
+            let mut params = vec![];
+            if let Some(sni) = &server.tls.server_name {
+                params.push(format!("sni={}", sni));
+            }
+            let name = percent_encode(&server.name);
+            let query = if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) };
+            format!("trojan://{}@{}:{}{}#{}", password, server.address, server.port, query, name)
+        }
+        Protocol::Hysteria2 => {
+            let password = server.password.as_deref().unwrap_or("");
+            let name = percent_encode(&server.name);
+            format!("hy2://{}@{}:{}#{}", password, server.address, server.port, name)
+        }
+        Protocol::Tuic => {
+            let uuid = server.uuid.as_deref().unwrap_or("");
+            let password = server.password.as_deref().unwrap_or("");
+            let name = percent_encode(&server.name);
+            format!("tuic://{}:{}@{}:{}#{}", uuid, password, server.address, server.port, name)
+        }
+    }
+}
+
+fn percent_encode(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 #[cfg(test)]

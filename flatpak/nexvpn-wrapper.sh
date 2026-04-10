@@ -11,9 +11,10 @@ export WEBKIT_DISABLE_DMABUF_RENDERER=1
 
 # WebKit runs its own nested sandbox which conflicts with Flatpak's sandbox,
 # causing "connection refused" on the web process socket — disable it
-export WEBKIT_FORCE_SANDBOX=0
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 
 # Ensure data directory exists
 mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/nexvpn"
 
 exec /app/bin/nexvpn "$@"
+

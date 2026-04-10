@@ -4,8 +4,9 @@ use serde_json::{json, Value};
 use crate::proxy::models::*;
 
 /// Generate a minimal Xray-core config for a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing_rules: &[RoutingRule], default_route: &str) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing_rules: &[RoutingRule], default_route: &str, auth: (&str, &str), api_port: u16) -> Result<Value> {
     let outbound = build_outbound(server)?;
+    let (auth_user, auth_pass) = auth;
 
     let config = json!({
         "log": {
@@ -36,8 +37,14 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
                 "port": socks_port,
                 "listen": "127.0.0.1",
                 "protocol": "socks",
-                "settings": {
-                    "udp": true
+                "settings": if cfg!(target_os = "android") {
+                    json!({
+                        "auth": "password",
+                        "accounts": [{ "user": auth_user, "pass": auth_pass }],
+                        "udp": true
+                    })
+                } else {
+                    json!({ "udp": true })
                 },
                 "sniffing": {
                     "enabled": true,
@@ -49,6 +56,13 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
                 "port": http_port,
                 "listen": "127.0.0.1",
                 "protocol": "http",
+                "settings": if cfg!(target_os = "android") {
+                    json!({
+                        "accounts": [{ "user": auth_user, "pass": auth_pass }]
+                    })
+                } else {
+                    json!({})
+                },
                 "sniffing": {
                     "enabled": true,
                     "destOverride": ["http", "tls"]
@@ -56,7 +70,7 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
             },
             {
                 "tag": "api-in",
-                "port": 10813,
+                "port": api_port,
                 "listen": "127.0.0.1",
                 "protocol": "dokodemo-door",
                 "settings": {
@@ -178,6 +192,31 @@ fn build_outbound(server: &Server) -> Result<Value> {
         }
         Transport::Tcp => {
             stream["network"] = json!("tcp");
+        }
+        Transport::Xhttp => {
+            stream["network"] = json!("xhttp");
+            let xhttp = server.xhttp.as_ref();
+            let mut settings = json!({
+                "path": xhttp.map(|x| x.path.as_str()).unwrap_or("/")
+            });
+            if let Some(host) = xhttp.and_then(|x| x.host.as_deref()) {
+                settings["host"] = json!(host);
+            }
+            if let Some(mode) = xhttp.and_then(|x| x.mode.as_deref()) {
+                settings["mode"] = json!(mode);
+            }
+            stream["xhttpSettings"] = settings;
+        }
+        Transport::Httpupgrade => {
+            stream["network"] = json!("httpupgrade");
+            let hu = server.httpupgrade.as_ref();
+            let mut settings = json!({
+                "path": hu.map(|h| h.path.as_str()).unwrap_or("/")
+            });
+            if let Some(host) = hu.and_then(|h| h.host.as_deref()) {
+                settings["host"] = json!(host);
+            }
+            stream["httpupgradeSettings"] = settings;
         }
         _ => {}
     }

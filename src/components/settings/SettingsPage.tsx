@@ -230,31 +230,71 @@ export function SettingsPage() {
 
       <div className="settings-section">
         <div className="settings-label">{t("settings.ports")}</div>
-        <div className="port-inputs">
-          <div className="form-group inline">
-            <label className="form-label">SOCKS</label>
+        <div className="core-radio-group" style={{ marginBottom: 8 }}>
+          <label className={`core-radio ${state.settings.port_mode === "auto" ? "active" : ""}`}>
             <input
-              className="form-input small"
-              type="number"
-              min={1}
-              max={65535}
-              value={state.settings.socks_port}
-              onChange={(e) => update("socks_port", parseInt(e.target.value) || 0)}
+              type="radio"
+              name="portMode"
+              checked={state.settings.port_mode === "auto"}
+              onChange={() => update("port_mode", "auto")}
             />
-          </div>
-          <div className="form-group inline">
-            <label className="form-label">HTTP</label>
+            <span>{t("settings.ports.auto")}</span>
+          </label>
+          <label className={`core-radio ${state.settings.port_mode === "manual" ? "active" : ""}`}>
             <input
-              className="form-input small"
-              type="number"
-              min={1}
-              max={65535}
-              value={state.settings.http_port}
-              onChange={(e) => update("http_port", parseInt(e.target.value) || 0)}
+              type="radio"
+              name="portMode"
+              checked={state.settings.port_mode === "manual"}
+              onChange={() => update("port_mode", "manual")}
             />
-          </div>
+            <span>{t("settings.ports.manual")}</span>
+          </label>
         </div>
+        {state.settings.port_mode === "manual" && (
+          <div className="port-inputs">
+            <div className="form-group inline">
+              <label className="form-label">SOCKS</label>
+              <input
+                className="form-input small"
+                type="number"
+                min={1}
+                max={65535}
+                value={state.settings.socks_port}
+                onChange={(e) => update("socks_port", parseInt(e.target.value) || 0)}
+              />
+            </div>
+            <div className="form-group inline">
+              <label className="form-label">HTTP</label>
+              <input
+                className="form-input small"
+                type="number"
+                min={1}
+                max={65535}
+                value={state.settings.http_port}
+                onChange={(e) => update("http_port", parseInt(e.target.value) || 0)}
+              />
+            </div>
+          </div>
+        )}
+        {state.settings.port_mode === "auto" && (
+          <div className="hwid-desc">{t("settings.ports.autoDesc")}</div>
+        )}
       </div>
+
+      {deviceInfo?.platform === "android" && (
+        <div className="settings-section">
+          <div className="settings-label">{t("settings.stealth")}</div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={state.settings.stealth_mode}
+              onChange={(e) => update("stealth_mode", e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+          <div className="hwid-desc">{t("settings.stealthDesc")}</div>
+        </div>
+      )}
     </>
   );
 

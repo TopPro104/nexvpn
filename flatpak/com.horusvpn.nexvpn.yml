@@ -25,6 +25,9 @@ finish-args:
   - --talk-name=org.freedesktop.portal.Desktop
   # Desktop notifications (VPN connection status)
   - --talk-name=org.freedesktop.Notifications
+  # Write system proxy settings via gsettings (host dconf)
+  - --talk-name=ca.desrt.dconf
+  - --filesystem=xdg-config/dconf:rw
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
@@ -50,11 +53,8 @@ modules:
         esac
         bash download-cores.sh "$TARGET"
 
-      # Build frontend
-      - npm run build
-
-      # Build Tauri (Rust backend)
-      - cd src-tauri && cargo build --release
+      # Build frontend + Rust backend via Tauri CLI (ensures correct production mode)
+      - npx @tauri-apps/cli@2 build --no-bundle
 
       # Install main binary
       - install -Dm755 src-tauri/target/release/nexvpn /app/bin/nexvpn

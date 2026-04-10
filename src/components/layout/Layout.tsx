@@ -1,6 +1,6 @@
 import React from "react";
 import { Sidebar } from "./Sidebar";
-import { useApp, SettingsTab, StatsTab, LogsFilter } from "../../context/AppContext";
+import { useApp, SettingsTab, StatsTab, LogsFilter, RoutingTab } from "../../context/AppContext";
 import { t } from "../../i18n/translations";
 
 function SubTabs() {
@@ -88,6 +88,28 @@ function SubTabs() {
               key={tt.id}
               className={`tab ${state.logsFilter === tt.id ? "active" : ""}`}
               onClick={() => dispatch({ type: "SET_LOGS_FILTER", filter: tt.id })}
+            >
+              {tt.label}
+            </div>
+          ))}
+        </>
+      );
+    }
+
+    case "routing": {
+      const isRu = !t("servers.manual").includes("Manual");
+      const isAndroid = /android/i.test(navigator.userAgent);
+      const tabs: { id: RoutingTab; label: string }[] = [
+        { id: "rules", label: isRu ? "Правила" : "Rules" },
+        ...(isAndroid ? [{ id: "apps" as RoutingTab, label: isRu ? "Приложения" : "Apps" }] : []),
+      ];
+      return (
+        <>
+          {tabs.map((tt) => (
+            <div
+              key={tt.id}
+              className={`tab ${state.routingTab === tt.id ? "active" : ""}`}
+              onClick={() => dispatch({ type: "SET_ROUTING_TAB", tab: tt.id })}
             >
               {tt.label}
             </div>

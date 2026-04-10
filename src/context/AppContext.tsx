@@ -14,6 +14,7 @@ import { setLang, Lang } from "../i18n/translations";
 export type Page = "home" | "subscriptions" | "settings" | "logs" | "stats" | "routing";
 export type SettingsTab = "style" | "vpn" | "other";
 export type StatsTab = "overview" | "traffic" | "history";
+export type RoutingTab = "rules" | "apps";
 export type LogsFilter = "all" | "errors" | "warnings";
 
 // ── Persisted UI state ────────────────────────
@@ -51,6 +52,7 @@ export interface AppState {
   settingsTab: SettingsTab;
   statsTab: StatsTab;
   logsFilter: LogsFilter;
+  routingTab: RoutingTab;
 }
 
 export interface Toast {
@@ -64,12 +66,16 @@ const defaultSettings: Settings = {
   style: "default",
   socks_port: 10808,
   http_port: 10809,
+  port_mode: "auto",
   auto_connect: false,
   language: "en",
   vpn_mode: "proxy",
   auto_reconnect: false,
   hwid_enabled: true,
   animation: "smooth",
+  stealth_mode: false,
+  per_app_mode: "all",
+  per_app_list: [],
 };
 
 const initialState: AppState = {
@@ -96,6 +102,7 @@ const initialState: AppState = {
   settingsTab: "style" as SettingsTab,
   statsTab: "overview" as StatsTab,
   logsFilter: "all" as LogsFilter,
+  routingTab: "rules" as RoutingTab,
 };
 
 // ── Actions ────────────────────────────────────
@@ -121,7 +128,8 @@ type Action =
   | { type: "TRACK_RECENT_SERVER"; id: string }
   | { type: "SET_SETTINGS_TAB"; tab: SettingsTab }
   | { type: "SET_STATS_TAB"; tab: StatsTab }
-  | { type: "SET_LOGS_FILTER"; filter: LogsFilter };
+  | { type: "SET_LOGS_FILTER"; filter: LogsFilter }
+  | { type: "SET_ROUTING_TAB"; tab: RoutingTab };
 
 let toastId = 0;
 
@@ -218,6 +226,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, statsTab: action.tab };
     case "SET_LOGS_FILTER":
       return { ...state, logsFilter: action.filter };
+    case "SET_ROUTING_TAB":
+      return { ...state, routingTab: action.tab };
     default:
       return state;
   }

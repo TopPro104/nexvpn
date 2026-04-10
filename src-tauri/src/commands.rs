@@ -201,9 +201,19 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
     let tun_mode = state.settings.vpn_mode == "tun";
     let routing_rules = state.routing_rules.clone();
     let default_route = state.default_route.clone();
+    let per_app_mode = state.settings.per_app_mode.clone();
+    let per_app_list = state.settings.per_app_list.clone();
+    let stealth = state.settings.stealth_mode;
+
+    // Auto port mode: generate random ports each connection to avoid fingerprinting
+    if state.settings.port_mode == "auto" {
+        let (socks, http) = CoreManager::generate_random_ports();
+        ctx.core.set_ports(socks, http).await;
+        log::info!("Auto port mode: using random ports SOCKS:{} HTTP:{}", socks, http);
+    }
 
     ctx.core
-        .start(&server, tun_mode, &routing_rules, &default_route)
+        .start(&server, tun_mode, &routing_rules, &default_route, &per_app_mode, &per_app_list, stealth)
         .await
         .map_err(|e| format!("Failed to start core: {}", e))?;
 
@@ -336,8 +346,11 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
                 let tun_mode = state.settings.vpn_mode == "tun";
                 let rules = state.routing_rules.clone();
                 let dr = state.default_route.clone();
+                let pam = state.settings.per_app_mode.clone();
+                let pal = state.settings.per_app_list.clone();
+                let stl = state.settings.stealth_mode;
                 drop(state);
-                ctx.core.start(&s, tun_mode, &rules, &dr).await.map_err(|e| e.to_string())?;
+                ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
             }
         }
     }
@@ -577,8 +590,8 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
         save_state(&state);
     }
 
-    // If ports changed, update CoreManager and reconnect if needed
-    let ports_changed = old_socks != settings.socks_port || old_http != settings.http_port;
+    // If ports changed and in manual mode, update CoreManager and reconnect if needed
+    let ports_changed = settings.port_mode == "manual" && (old_socks != settings.socks_port || old_http != settings.http_port);
     if ports_changed {
         ctx.core.set_ports(settings.socks_port, settings.http_port).await;
 
@@ -590,14 +603,18 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
                     let tun_mode = state.settings.vpn_mode == "tun";
                     let rules = state.routing_rules.clone();
                     let dr = state.default_route.clone();
+                    let pam = state.settings.per_app_mode.clone();
+                    let pal = state.settings.per_app_list.clone();
+                    let stl = state.settings.stealth_mode;
                     drop(state);
                     // Reconnect with new ports
-                    if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr).await {
+                    if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
                         log::error!("Failed to reconnect with new ports: {}", e);
                     }
-                    // Update system proxy with new HTTP port (only in proxy mode)
+                    // Update system proxy with current HTTP port (only in proxy mode)
                     if !tun_mode {
-                        if let Err(e) = proxy_setter::set_system_proxy("127.0.0.1", settings.http_port) {
+                        let current_http = ctx.core.http_port().await;
+                        if let Err(e) = proxy_setter::set_system_proxy("127.0.0.1", current_http) {
                             log::error!("Failed to update system proxy: {}", e);
                         }
                     }
@@ -741,8 +758,11 @@ pub async fn save_routing_rules(
                 let tun_mode = state.settings.vpn_mode == "tun";
                 let rules = state.routing_rules.clone();
                 let dr = state.default_route.clone();
+                let pam = state.settings.per_app_mode.clone();
+                let pal = state.settings.per_app_list.clone();
+                let stl = state.settings.stealth_mode;
                 drop(state);
-                if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr).await {
+                if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
                     log::error!("Failed to reconnect with new routing rules: {}", e);
                 }
             }
@@ -1154,6 +1174,77 @@ fn format_epoch_date(epoch_secs: u64) -> String {
     let d = remaining + 1;
 
     format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// Get shareable link for a server
+#[tauri::command]
+pub async fn get_server_link(ctx: State<'_, AppContext>, server_id: String) -> Result<String, String> {
+    let state = ctx.state.lock().await;
+    let server = state.servers.iter()
+        .find(|s| s.id == server_id)
+        .ok_or("Server not found")?;
+    Ok(link_parser::server_to_link(server))
+}
+
+/// Get installed apps (Android only, for per-app VPN)
+#[derive(Serialize, serde::Deserialize)]
+pub struct InstalledApp {
+    pub package_name: String,
+    pub label: String,
+    #[serde(default)]
+    pub icon: String, // base64 PNG
+}
+
+#[tauri::command]
+pub fn get_installed_apps() -> Vec<InstalledApp> {
+    #[cfg(target_os = "android")]
+    {
+        // Read JSON written by MainActivity (includes labels + base64 icons)
+        for base in &[
+            "/data/data/com.horusvpn.nexvpn/files",
+            "/data/user/0/com.horusvpn.nexvpn/files",
+        ] {
+            let path = std::path::PathBuf::from(base).join("nexvpn/.installed_apps.json");
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(apps) = serde_json::from_str::<Vec<InstalledApp>>(&content) {
+                    return apps;
+                }
+            }
+        }
+        vec![]
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        vec![]
+    }
+}
+
+/// Measure real latency through VPN tunnel (SOCKS5 proxy → external endpoint)
+#[tauri::command]
+pub async fn ping_through_vpn(ctx: State<'_, AppContext>) -> Result<u32, String> {
+    if !ctx.core.is_running().await {
+        return Err("VPN not connected".into());
+    }
+
+    let socks_port = ctx.core.socks_port().await;
+    let (user, pass) = ctx.core.proxy_auth();
+
+    let proxy_url = format!("socks5://{}:{}@127.0.0.1:{}", user, pass, socks_port);
+    let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let start = std::time::Instant::now();
+    client.head("https://1.1.1.1")
+        .send()
+        .await
+        .map_err(|e| format!("Ping failed: {}", e))?;
+
+    Ok(start.elapsed().as_millis() as u32)
 }
 
 pub fn load_state() -> AppState {

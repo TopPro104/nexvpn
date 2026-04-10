@@ -8,6 +8,19 @@ src-tauri/target/
 # Proxy core binaries (users download these themselves)
 src-tauri/binaries/*.exe
 src-tauri/binaries/*.dll
+src-tauri/binaries/sing-box-*
+src-tauri/binaries/xray-*
+src-tauri/binaries/wintun.dll
+
+# Flatpak build artifacts
+flatpak-build/
+flatpak-repo/
+*.flatpak
+
+# Release artifacts
+*.apk
+*.dmg
+*.keystore
 
 # IDE
 .vscode/

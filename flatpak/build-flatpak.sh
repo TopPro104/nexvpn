@@ -10,8 +10,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/flatpak-build"
-REPO_DIR="$PROJECT_DIR/flatpak-repo"
+BUILD_DIR="/var/tmp/nexvpn-flatpak-build"
+REPO_DIR="/var/tmp/nexvpn-flatpak-repo"
 
 echo "=== Building NexVPN Flatpak ==="
 echo "Project: $PROJECT_DIR"
@@ -22,6 +22,7 @@ flatpak-builder \
   --force-clean \
   --user \
   --install-deps-from=flathub \
+  --state-dir="/var/tmp/nexvpn-flatpak-state" \
   --repo="$REPO_DIR" \
   "$BUILD_DIR" \
   "$SCRIPT_DIR/com.horusvpn.nexvpn.yml"

@@ -4,26 +4,35 @@ use serde_json::{json, Value};
 use crate::proxy::models::*;
 
 /// Generate a sing-box config for connecting to a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str, auth: (&str, &str), clash_secret: &str, clash_api_port: u16) -> Result<Value> {
     let outbound = build_outbound(server)?;
+    let (auth_user, auth_pass) = auth;
 
     // On Android, TUN requires VpnService — force disable
     let tun_mode = if cfg!(target_os = "android") { false } else { tun_mode };
 
-    let mut inbounds = vec![
-        json!({
-            "type": "socks",
-            "tag": "socks-in",
-            "listen": "127.0.0.1",
-            "listen_port": socks_port
-        }),
-        json!({
-            "type": "http",
-            "tag": "http-in",
-            "listen": "127.0.0.1",
-            "listen_port": http_port
-        }),
-    ];
+    // Android: auth protects local proxy from other apps scanning ports
+    // Desktop: no auth needed, system proxy doesn't support credentials
+    let use_auth = cfg!(target_os = "android");
+
+    let mut socks_inbound = json!({
+        "type": "socks",
+        "tag": "socks-in",
+        "listen": "127.0.0.1",
+        "listen_port": socks_port
+    });
+    let mut http_inbound = json!({
+        "type": "http",
+        "tag": "http-in",
+        "listen": "127.0.0.1",
+        "listen_port": http_port
+    });
+    if use_auth {
+        socks_inbound["users"] = json!([{ "username": auth_user, "password": auth_pass }]);
+        http_inbound["users"] = json!([{ "username": auth_user, "password": auth_pass }]);
+    }
+
+    let mut inbounds = vec![socks_inbound, http_inbound];
 
     if tun_mode {
         inbounds.push(json!({
@@ -159,7 +168,8 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         },
         "experimental": {
             "clash_api": {
-                "external_controller": "127.0.0.1:9090"
+                "external_controller": format!("127.0.0.1:{}", clash_api_port),
+                "secret": clash_secret
             }
         }
     });
@@ -233,6 +243,31 @@ fn build_outbound(server: &Server) -> Result<Value> {
         }
         Transport::Http => {
             out["transport"] = json!({"type": "http"});
+        }
+        Transport::Xhttp => {
+            let xhttp = server.xhttp.as_ref();
+            let mut transport = json!({
+                "type": "xhttp",
+                "path": xhttp.map(|x| x.path.as_str()).unwrap_or("/")
+            });
+            if let Some(host) = xhttp.and_then(|x| x.host.as_deref()) {
+                transport["host"] = json!(host);
+            }
+            if let Some(mode) = xhttp.and_then(|x| x.mode.as_deref()) {
+                transport["mode"] = json!(mode);
+            }
+            out["transport"] = transport;
+        }
+        Transport::Httpupgrade => {
+            let hu = server.httpupgrade.as_ref();
+            let mut transport = json!({
+                "type": "httpupgrade",
+                "path": hu.map(|h| h.path.as_str()).unwrap_or("/")
+            });
+            if let Some(host) = hu.and_then(|h| h.host.as_deref()) {
+                transport["host"] = json!(host);
+            }
+            out["transport"] = transport;
         }
         _ => {}
     }

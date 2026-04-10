@@ -18,16 +18,25 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 ## Features
 
 - **Multi-protocol** — VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC
+- **Multi-transport** — TCP, WebSocket, gRPC, HTTP/2, QUIC, xHTTP (splithttp), HTTPUpgrade
 - **Dual core** — switch between sing-box and Xray-core in one click
 - **Subscriptions** — import and auto-update subscription URLs
 - **Link import** — paste `vless://`, `vmess://`, `ss://`, `trojan://` links directly
+- **Link export** — generate shareable protocol links from any server
 - **Deep links** — open `nexvpn://import/URL` to add subscriptions from browser
 - **Routing rules** — domain-based rules (proxy / direct / block) with quick presets for ads blocking and regional bypass
+- **Per-app VPN** (Android) — route only selected apps through VPN, or exclude specific apps
 - **Split tunneling** — choose default route: proxy all traffic or only selected domains (Direct All mode)
 - **System Proxy & TUN mode** — system HTTP proxy or full TUN VPN (captures all traffic)
 - **Admin elevation** — one-click "Run as Administrator" button for TUN mode (Windows UAC / macOS sudo prompt)
+- **Anti-detection** — randomized ports, authenticated local proxies, Clash API secret, no fingerprinting via known ports (Android)
+- **Stealth Mode** (Android, root) — experimental root-based hiding: iptables port blocking for other apps
+- **IPv6 support** — full IPv6 routing through VPN tunnel, prevents IPv6 leaks
+- **Kill switch** (Android) — if VPN process crashes, TUN stays open blocking all traffic until auto-recovery
+- **Auto-reconnect** — automatically reconnects if the VPN connection drops unexpectedly
 - **Onboarding** — interactive guided tour for first-time users with language selection
 - **TCP ping** — single and bulk server latency testing, auto-select best server
+- **VPN ping** — measure real latency through the VPN tunnel
 - **Quick connect** — recently used and recommended servers for one-tap connection
 - **World map** — interactive map visualization of server locations
 - **Themes** — 7 color themes (Dark, Light, Midnight Blue, Cyberpunk, Aurora, Sunset, Matrix)
@@ -38,9 +47,10 @@ Open-source VPN client built with Tauri, React and Rust. Supports multiple proxy
 - **i18n** — English and Russian
 - **HWID** — optional device fingerprint for panel-based subscriptions
 - **Keyboard shortcuts** — number keys (1-6) for navigation, Shift+D connect/disconnect, Shift+F search
-- **Auto-reconnect** — automatically reconnects if the VPN connection drops unexpectedly
+- **Quick Settings Tile** (Android) — toggle VPN from notification shade
+- **Home screen widget** (Android) — VPN status and one-tap toggle
 - **Adaptive UI** — responsive layout with floating sidebar on desktop and bottom navigation bar on mobile
-- **Cross-platform** — Windows, macOS, Android from a single codebase
+- **Cross-platform** — Windows, macOS, Linux, Android from a single codebase
 - **Lightweight** — single binary, no Electron, ~16 MB app size
 
 ## Download
@@ -112,9 +122,9 @@ nexvpn/
 │   ├── components/
 │   │   ├── home/               # StatusPanel, ServerList, TrafficPanel, QuickConnect, WorldMap
 │   │   ├── layout/             # Layout (top bar + sub-tabs), Sidebar
-│   │   ├── settings/           # SettingsPage (style / vpn / other tabs)
+│   │   ├── settings/           # SettingsPage, PerAppVpn
 │   │   ├── subscriptions/      # SubList
-│   │   ├── routing/            # RoutingPage
+│   │   ├── routing/            # RoutingPage (rules + per-app tabs)
 │   │   ├── stats/              # StatsPage (overview / traffic / history)
 │   │   ├── logs/               # LogsPage (with level filtering)
 │   │   ├── onboarding/         # OnboardingOverlay
@@ -133,15 +143,14 @@ nexvpn/
 │   │   └── xray.rs             # Xray config generation
 │   ├── proxy/
 │   │   ├── models.rs           # Data models (Server, Settings, etc.)
-│   │   ├── link_parser.rs      # Protocol link parser
+│   │   ├── link_parser.rs      # Protocol link parser + exporter
 │   │   └── subscription.rs     # Subscription fetcher
 │   ├── system/
-│   │   ├── proxy_setter.rs     # Windows system proxy control
+│   │   ├── proxy_setter.rs     # System proxy control (Win/Mac/Linux)
 │   │   └── hwid.rs             # HWID generation for panel auth
 │   └── testing/
 │       └── ping.rs             # TCP latency testing
 ├── download-cores.sh           # Core binary downloader
-├── sign-apk.bat                # Android APK signing script
 ├── LICENSE
 └── README.md
 ```
@@ -164,6 +173,14 @@ sudo /Applications/NexVPN.app/Contents/MacOS/NexVPN
 Install the APK directly. The app uses a responsive mobile layout with a bottom navigation bar. All features work the same as on desktop.
 
 For TUN mode, Android will prompt you to allow VPN permissions on first connect.
+
+### Android-specific features
+
+- **Per-app VPN** — in Routing → Apps tab, choose which apps use VPN
+- **Quick Settings Tile** — toggle VPN from notification shade
+- **Home screen widget** — shows status + one-tap toggle
+- **Stealth Mode** (requires root) — hides VPN from detection apps via iptables
+- **Battery optimization exemption** — requested on first launch to keep VPN alive in background
 
 ## Community
 

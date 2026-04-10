@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
 import { api, RoutingRule, RuleAction } from "../../api/tauri";
-import { t } from "../../i18n/translations";
-import { getLang } from "../../i18n/translations";
+import { t, getLang } from "../../i18n/translations";
+import { PerAppVpn } from "../settings/PerAppVpn";
 
 export interface Preset {
   id: string;
@@ -57,6 +57,7 @@ function nextId() {
 export function RoutingPage() {
   const { state, dispatch, toast } = useApp();
   void state.langTick;
+  const routingTab = state.routingTab ?? "rules";
 
   const [newDomain, setNewDomain] = useState("");
   const [newAction, setNewAction] = useState<RuleAction>("direct");
@@ -162,10 +163,16 @@ export function RoutingPage() {
 
   const lang = getLang();
 
+  if (routingTab === "apps") {
+    return (
+      <div className="routing-page">
+        <PerAppVpn />
+      </div>
+    );
+  }
+
   return (
     <div className="routing-page">
-      <h2>{t("routing.title")}</h2>
-
       {/* Default route toggle */}
       <div className="settings-section">
         <div className="settings-label">{t("routing.defaultRoute")}</div>
@@ -290,6 +297,7 @@ export function RoutingPage() {
           </div>
         )}
       </div>
+
     </div>
   );
 }

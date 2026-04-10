@@ -20,6 +20,15 @@ pub struct CoreManager {
     http_port: Arc<Mutex<u16>>,
     sidecar_dir: Arc<Mutex<Option<PathBuf>>>,
     logs: Arc<Mutex<Vec<String>>>,
+    /// Random auth credentials for SOCKS5/HTTP inbounds (regenerated each app launch)
+    proxy_auth_user: String,
+    proxy_auth_pass: String,
+    /// Random secret for Clash API (regenerated each app launch)
+    clash_api_secret: String,
+    /// Random port for Xray stats API (dokodemo-door), avoids fingerprinting
+    xray_api_port: u16,
+    /// Random port for Clash API (sing-box), avoids fingerprinting
+    clash_api_port: u16,
 }
 
 impl CoreManager {
@@ -75,6 +84,19 @@ impl CoreManager {
         std::fs::create_dir_all(&data_dir).ok();
         log::info!("CoreManager data_dir: {:?} (exists={})", data_dir, data_dir.exists());
 
+        // Generate random credentials per app launch — prevents other apps
+        // from connecting to our local SOCKS5/HTTP/Clash API
+        let proxy_auth_user = uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string();
+        let proxy_auth_pass = uuid::Uuid::new_v4().to_string().replace('-', "");
+        let clash_api_secret = uuid::Uuid::new_v4().to_string().replace('-', "");
+        // Random ports for internal APIs (avoid fingerprinting)
+        let base_seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        let xray_api_port = (40000 + (base_seed.wrapping_mul(2862933555777941757) >> 48) % 20000) as u16;
+        let clash_api_port = (40000 + (base_seed.wrapping_mul(6364136223846793005) >> 48) % 20000) as u16;
+
         Self {
             process: Arc::new(Mutex::new(None)),
             config_dir: data_dir,
@@ -83,7 +105,45 @@ impl CoreManager {
             http_port: Arc::new(Mutex::new(10809)),
             sidecar_dir: Arc::new(Mutex::new(None)),
             logs: Arc::new(Mutex::new(Vec::new())),
+            proxy_auth_user,
+            proxy_auth_pass,
+            clash_api_secret,
+            xray_api_port,
+            clash_api_port,
         }
+    }
+
+    /// Generate random ports in the safe range (10000-60000)
+    pub fn generate_random_ports() -> (u16, u16) {
+        let mut rng_seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
+        // Simple LCG random
+        let mut next = move || -> u16 {
+            rng_seed = rng_seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let range = 50000u64; // 10000-60000
+            (10000 + (rng_seed >> 33) % range) as u16
+        };
+
+        let socks = next();
+        let mut http = next();
+        // Ensure different ports
+        while http == socks {
+            http = next();
+        }
+        (socks, http)
+    }
+
+    #[allow(dead_code)]
+    pub fn proxy_auth(&self) -> (&str, &str) {
+        (&self.proxy_auth_user, &self.proxy_auth_pass)
+    }
+
+    #[allow(dead_code)]
+    pub fn clash_api_secret(&self) -> &str {
+        &self.clash_api_secret
     }
 
     pub async fn set_sidecar_dir(&self, dir: PathBuf) {
@@ -111,7 +171,8 @@ impl CoreManager {
         *self.http_port.lock().await
     }
 
-    pub async fn start(&self, server: &Server, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str) -> Result<()> {
+    #[allow(unused_variables)]
+    pub async fn start(&self, server: &Server, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str, per_app_mode: &str, per_app_list: &[String], stealth_mode: bool) -> Result<()> {
         self.stop().await?;
 
         let core_type = self.core_type.lock().await.clone();
@@ -125,9 +186,12 @@ impl CoreManager {
             return Err(anyhow!("TUN mode requires sing-box. Switch core to sing-box in settings."));
         }
 
+        let auth = (self.proxy_auth_user.as_str(), self.proxy_auth_pass.as_str());
+        let clash_secret = self.clash_api_secret.as_str();
+
         let config = match core_type {
-            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, routing_rules, default_route)?,
-            CoreType::Xray => xray::generate_config(server, socks_port, http_port, routing_rules, default_route)?,
+            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, routing_rules, default_route, auth, clash_secret, self.clash_api_port)?,
+            CoreType::Xray => xray::generate_config(server, socks_port, http_port, routing_rules, default_route, auth, self.xray_api_port)?,
         };
 
         let config_path = self.config_dir.join("running_config.json");
@@ -239,16 +303,23 @@ impl CoreManager {
                 .is_ok()
             {
                 log::info!("Core started in ~{}ms  SOCKS :{}", delays[..=attempt].iter().sum::<u64>(), socks_port);
-                // Signal Android VPN service to start
                 #[cfg(target_os = "android")]
-                self.signal_android_vpn(&format!("start:{}", socks_port));
+                {
+                    self.write_per_app_config(per_app_mode, per_app_list);
+                    self.write_stealth_config(stealth_mode);
+                    self.signal_android_vpn(&format!("start:{}:{}:{}", socks_port, self.proxy_auth_user, self.proxy_auth_pass));
+                }
                 return Ok(());
             }
         }
 
         // Even if health check didn't confirm, signal VPN (core may still be starting)
         #[cfg(target_os = "android")]
-        self.signal_android_vpn(&format!("start:{}", socks_port));
+        {
+            self.write_per_app_config(per_app_mode, per_app_list);
+            self.write_stealth_config(stealth_mode);
+            self.signal_android_vpn(&format!("start:{}:{}:{}", socks_port, self.proxy_auth_user, self.proxy_auth_pass));
+        }
 
         log::warn!("SOCKS port not open after health check — core may still be starting");
         Ok(())
@@ -281,6 +352,43 @@ impl CoreManager {
     }
 
     // ── Android VPN signaling ──────────────────────────
+
+    /// Write stealth mode flag for Android VpnService
+    #[cfg(target_os = "android")]
+    fn write_stealth_config(&self, enabled: bool) {
+        let android_paths = Self::read_android_paths();
+        let base_dir = android_paths
+            .get("files_dir")
+            .map(|s| PathBuf::from(s))
+            .unwrap_or_else(|| self.config_dir.clone());
+
+        let nexvpn_dir = base_dir.join("nexvpn");
+        std::fs::create_dir_all(&nexvpn_dir).ok();
+
+        let path = nexvpn_dir.join(".stealth_mode");
+        std::fs::write(&path, if enabled { "true" } else { "false" }).ok();
+        log::info!("Stealth mode config written: {}", enabled);
+    }
+
+    /// Write per-app VPN config file for Android VpnService to read
+    #[cfg(target_os = "android")]
+    fn write_per_app_config(&self, mode: &str, apps: &[String]) {
+        let android_paths = Self::read_android_paths();
+        let base_dir = android_paths
+            .get("files_dir")
+            .map(|s| PathBuf::from(s))
+            .unwrap_or_else(|| self.config_dir.clone());
+
+        let nexvpn_dir = base_dir.join("nexvpn");
+        std::fs::create_dir_all(&nexvpn_dir).ok();
+
+        // Format: first line = mode, rest = package names
+        let content = format!("{}\n{}", mode, apps.join("\n"));
+        let path = nexvpn_dir.join(".per_app_config");
+        std::fs::write(&path, content).ok();
+        log::info!("Per-app config written: mode={}, apps={}", mode, apps.len());
+    }
+
     #[cfg(target_os = "android")]
     fn signal_android_vpn(&self, command: &str) {
         let android_paths = Self::read_android_paths();
@@ -361,7 +469,8 @@ impl CoreManager {
             .build()?;
 
         let resp = client
-            .get("http://127.0.0.1:9090/connections")
+            .get(format!("http://127.0.0.1:{}/connections", self.clash_api_port))
+            .header("Authorization", format!("Bearer {}", self.clash_api_secret))
             .send()
             .await?;
 
@@ -383,7 +492,7 @@ impl CoreManager {
         let bin = self.resolve_binary(&CoreType::Xray).await?;
 
         let mut cmd = tokio::process::Command::new(&bin);
-        cmd.args(["api", "statsquery", "--server=127.0.0.1:10813"])
+        cmd.args(["api", "statsquery", &format!("--server=127.0.0.1:{}", self.xray_api_port)])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
 
@@ -516,6 +625,12 @@ impl CoreManager {
         #[cfg(not(target_os = "android"))]
         {
             let exe_ext = if cfg!(windows) { ".exe" } else { "" };
+
+            // 0) NEXVPN_SIDECAR_DIR env var (Flatpak / custom installs)
+            if let Ok(dir) = std::env::var("NEXVPN_SIDECAR_DIR") {
+                let p = PathBuf::from(&dir).join(format!("{}{}", name, exe_ext));
+                if p.exists() { return Ok(p); }
+            }
 
             // 1) Tauri sidecar dir
             if let Some(dir) = self.sidecar_dir.lock().await.as_ref() {

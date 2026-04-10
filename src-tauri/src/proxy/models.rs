@@ -21,6 +21,8 @@ pub enum Transport {
     Grpc,
     Http,
     Quic,
+    Xhttp,
+    Httpupgrade,
 }
 
 /// TLS settings
@@ -54,6 +56,21 @@ pub struct GrpcSettings {
     pub service_name: String,
 }
 
+/// xhttp (splithttp) settings
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct XhttpSettings {
+    pub path: String,
+    pub host: Option<String>,
+    pub mode: Option<String>, // "auto", "packet-up", "stream-up" etc.
+}
+
+/// httpupgrade settings
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HttpupgradeSettings {
+    pub path: String,
+    pub host: Option<String>,
+}
+
 /// A single proxy server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Server {
@@ -74,6 +91,8 @@ pub struct Server {
     pub transport: Transport,
     pub ws: Option<WsSettings>,
     pub grpc: Option<GrpcSettings>,
+    pub xhttp: Option<XhttpSettings>,
+    pub httpupgrade: Option<HttpupgradeSettings>,
 
     // TLS
     pub tls: TlsSettings,
@@ -103,6 +122,8 @@ pub struct Settings {
     pub style: String,
     pub socks_port: u16,
     pub http_port: u16,
+    #[serde(default = "default_port_mode")]
+    pub port_mode: String, // "auto" or "manual"
     pub auto_connect: bool,
     pub language: String,
     #[serde(default = "default_vpn_mode")]
@@ -113,9 +134,20 @@ pub struct Settings {
     pub hwid_enabled: bool,
     #[serde(default = "default_animation")]
     pub animation: String,
+    /// Experimental: root-based stealth to hide VPN from detection apps
+    #[serde(default)]
+    pub stealth_mode: bool,
+    /// Per-app VPN mode: "all" (default), "include" (only listed apps), "exclude" (all except listed)
+    #[serde(default = "default_per_app_mode")]
+    pub per_app_mode: String,
+    /// Package names for per-app VPN
+    #[serde(default)]
+    pub per_app_list: Vec<String>,
 }
 
 fn default_style() -> String { "default".to_string() }
+fn default_port_mode() -> String { "auto".to_string() }
+fn default_per_app_mode() -> String { "all".to_string() }
 fn default_vpn_mode() -> String { "proxy".to_string() }
 fn default_true() -> bool { true }
 fn default_animation() -> String { "smooth".to_string() }
@@ -127,12 +159,16 @@ impl Default for Settings {
             style: "default".to_string(),
             socks_port: 10808,
             http_port: 10809,
+            port_mode: "auto".to_string(),
             auto_connect: false,
             language: "en".to_string(),
             vpn_mode: "proxy".to_string(),
             auto_reconnect: false,
             hwid_enabled: true,
             animation: "smooth".to_string(),
+            stealth_mode: false,
+            per_app_mode: "all".to_string(),
+            per_app_list: Vec::new(),
         }
     }
 }

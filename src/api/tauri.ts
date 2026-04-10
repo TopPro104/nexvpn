@@ -39,12 +39,22 @@ export interface Settings {
   style: string;
   socks_port: number;
   http_port: number;
+  port_mode: string; // "auto" | "manual"
   auto_connect: boolean;
   language: string;
   vpn_mode: string; // "proxy" | "tun"
   auto_reconnect: boolean;
   hwid_enabled: boolean;
   animation: string; // "none" | "smooth" | "energetic"
+  stealth_mode: boolean;
+  per_app_mode: string; // "all" | "include" | "exclude"
+  per_app_list: string[];
+}
+
+export interface InstalledApp {
+  package_name: string;
+  label: string;
+  icon: string; // base64 PNG
 }
 
 export interface DeviceInfo {
@@ -223,4 +233,13 @@ export const api = {
 
   // Persisted active server
   getActiveServerId: () => invoke<string | null>("get_active_server_id"),
+
+  // Per-app VPN
+  getInstalledApps: () => invoke<InstalledApp[]>("get_installed_apps"),
+
+  // VPN ping
+  pingThroughVpn: () => invoke<number>("ping_through_vpn"),
+
+  // Share
+  getServerLink: (serverId: string) => invoke<string>("get_server_link", { serverId }),
 };
