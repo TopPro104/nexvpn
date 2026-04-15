@@ -112,6 +112,33 @@ pub struct Subscription {
     pub url: String,
     pub servers: Vec<String>, // server IDs
     pub updated_at: Option<u64>,
+    /// Auto-update interval in hours (from Profile-Update-Interval header)
+    #[serde(default)]
+    pub update_interval: Option<u64>,
+    /// Bytes uploaded (from Subscription-Userinfo)
+    #[serde(default)]
+    pub upload: Option<u64>,
+    /// Bytes downloaded (from Subscription-Userinfo)
+    #[serde(default)]
+    pub download: Option<u64>,
+    /// Total traffic allowance in bytes (from Subscription-Userinfo, 0 = unlimited)
+    #[serde(default)]
+    pub total: Option<u64>,
+    /// Subscription expiry timestamp (from Subscription-Userinfo)
+    #[serde(default)]
+    pub expire: Option<u64>,
+    /// Subscription management page URL (from Profile-Web-Page-Url)
+    #[serde(default)]
+    pub web_page_url: Option<String>,
+    /// Support contact URL (from Support-Url)
+    #[serde(default)]
+    pub support_url: Option<String>,
+    /// Provider announcement message (from Announce header, decoded from base64)
+    #[serde(default)]
+    pub announce: Option<String>,
+    /// Next refill/renewal timestamp (from Subscription-Refill-Date)
+    #[serde(default)]
+    pub refill_date: Option<u64>,
 }
 
 /// User settings

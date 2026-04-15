@@ -20,6 +20,10 @@ export function AddSubModal({ open, onClose }: Props) {
 
   const handleAdd = async () => {
     if (!url.trim()) return;
+    if (state.subscriptions.some((s) => s.url === url.trim())) {
+      toast(t("toast.subDuplicate"), "error");
+      return;
+    }
     setLoading(true);
     try {
       const servers = await api.addSubscription(url.trim(), name.trim() || undefined);
@@ -31,7 +35,7 @@ export function AddSubModal({ open, onClose }: Props) {
       setName("");
       onClose();
     } catch (e) {
-      toast(`${e}`, "error");
+      toast(e instanceof Error ? e.message : String(e), "error");
     }
     setLoading(false);
   };

@@ -6,6 +6,7 @@ import { StatusPanel } from "./components/home/StatusPanel";
 import { TrafficPanel } from "./components/home/TrafficPanel";
 import { ServerList } from "./components/home/ServerList";
 import { QuickConnect } from "./components/home/QuickConnect";
+import { AnnounceBanner } from "./components/home/AnnounceBanner";
 import { SubList } from "./components/subscriptions/SubList";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { LogsPage } from "./components/logs/LogsPage";
@@ -14,7 +15,7 @@ import { RoutingPage } from "./components/routing/RoutingPage";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { ToastStack } from "./components/ui/Toast";
 import { useCallback, useRef, useEffect, useState } from "react";
-import { StatusResponse, api } from "./api/tauri";
+import { StatusResponse, SubscriptionInfo, api } from "./api/tauri";
 import { onOpenUrl, getCurrent as getDeepLinkUrls } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 import { t } from "./i18n/translations";
@@ -66,6 +67,57 @@ function AppContent() {
         });
     }
   }, [state.connected, state.settings.auto_reconnect, state.selectedServerId, dispatch, toast]);
+
+  // ── Subscription auto-update based on Profile-Update-Interval ──
+  const autoUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = autoUpdateTimers.current;
+
+    // Clear any timers for subs that no longer exist
+    for (const [id] of timers) {
+      if (!state.subscriptions.find((s) => s.id === id)) {
+        clearTimeout(timers.get(id)!);
+        timers.delete(id);
+      }
+    }
+
+    const scheduleUpdate = (sub: SubscriptionInfo) => {
+      if (!sub.update_interval || sub.update_interval <= 0) return;
+      if (timers.has(sub.id)) return; // already scheduled
+
+      const intervalMs = sub.update_interval * 3600_000; // hours → ms
+      const lastUpdate = sub.updated_at ? sub.updated_at * 1000 : 0;
+      const elapsed = Date.now() - lastUpdate;
+      const delay = Math.max(intervalMs - elapsed, 5_000); // at least 5s
+
+      const timer = setTimeout(async () => {
+        timers.delete(sub.id);
+        try {
+          await api.updateSubscription(sub.id);
+          const [servers, subs] = await Promise.all([
+            api.getServers(),
+            api.getSubscriptions(),
+          ]);
+          dispatch({ type: "SET_SERVERS", servers });
+          dispatch({ type: "SET_SUBSCRIPTIONS", subs });
+          toast(`${t("toast.subAutoUpdated")}: ${sub.name}`, "info");
+        } catch {
+          // Silent fail — will retry next interval
+        }
+      }, delay);
+      timers.set(sub.id, timer);
+    };
+
+    for (const sub of state.subscriptions) {
+      scheduleUpdate(sub);
+    }
+
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, [state.subscriptions, dispatch, toast]);
 
   // Deep link handler: nexvpn://import/SUBSCRIPTION_URL
   const processedUrls = useRef(new Set<string>());
@@ -248,6 +300,7 @@ function AppContent() {
           <div className={`home-page ${state.connected ? "vpn-active" : ""}`}>
             <div className="home-left">
               <StatusPanel />
+              <AnnounceBanner activeTab={state.serverListUI.tab} />
               <TrafficPanel />
               <QuickConnect />
             </div>

@@ -27,6 +27,15 @@ export interface SubscriptionInfo {
   url: string;
   server_count: number;
   updated_at: number | null;
+  update_interval: number | null;
+  upload: number | null;
+  download: number | null;
+  total: number | null;
+  expire: number | null;
+  web_page_url: string | null;
+  support_url: string | null;
+  announce: string | null;
+  refill_date: number | null;
 }
 
 export interface TrafficStats {
@@ -242,4 +251,7 @@ export const api = {
 
   // Share
   getServerLink: (serverId: string) => invoke<string>("get_server_link", { serverId }),
+
+  // Xposed module status
+  getXposedStatus: () => invoke<{ active: boolean; hooked_apps: string[] }>("get_xposed_status"),
 };

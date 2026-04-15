@@ -4,6 +4,7 @@ import { ServerInfo, api } from "../../api/tauri";
 import { Flag } from "../ui/Flag";
 import { extractCountryCode } from "../../utils/countryUtils";
 import { StarIcon, StarFilledIcon } from "../ui/Icons";
+import { t } from "../../i18n/translations";
 
 const PROTO_COLORS: Record<string, string> = {
   vless: "#5b9aff",
@@ -49,13 +50,27 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
     dispatch({ type: "SELECT_SERVER", id: server.id });
   };
 
+  const handleDoubleClick = async () => {
+    dispatch({ type: "SELECT_SERVER", id: server.id });
+    if (!state.connected || state.selectedServerId !== server.id) {
+      try {
+        const status = await api.connect(server.id);
+        dispatch({ type: "SET_STATUS", status });
+        toast(`${t("toast.connectedTo")} ${server.name}`, "success");
+      } catch (err) {
+        toast(err instanceof Error ? err.message : String(err), "error");
+      }
+    }
+  };
+
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!window.confirm(`${t("servers.confirmDelete")} "${server.name}"?`)) return;
     try {
       await api.removeServer(server.id);
       dispatch({ type: "REMOVE_SERVER", id: server.id });
     } catch (err) {
-      toast(`${err}`, "error");
+      toast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -78,6 +93,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
       <div
         className={`server-card grid-card ${isSelected ? "active" : ""}`}
         onClick={handleSelect}
+        onDoubleClick={handleDoubleClick}
       >
         <div className="grid-card-top">
           <Flag code={country} size={20} />
@@ -107,6 +123,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
     <div
       className={`server-card ${isSelected ? "active" : ""}`}
       onClick={handleSelect}
+      onDoubleClick={handleDoubleClick}
     >
       <span className="server-fav" onClick={handleFavorite}>
         {server.favorite ? <StarFilledIcon size={14} color="var(--warning)" /> : <StarIcon size={14} />}

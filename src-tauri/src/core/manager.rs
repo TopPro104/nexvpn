@@ -179,11 +179,11 @@ impl CoreManager {
         let socks_port = *self.socks_port.lock().await;
         let http_port = *self.http_port.lock().await;
 
-        // On desktop, TUN is only supported by sing-box (xray has no TUN inbound).
         // On Android, TUN is handled by VpnService + tun2socks, so both cores work.
+        // On desktop, TUN is only supported by sing-box (xray has no TUN inbound).
         #[cfg(not(target_os = "android"))]
         if tun_mode && core_type == CoreType::Xray {
-            return Err(anyhow!("TUN mode requires sing-box. Switch core to sing-box in settings."));
+            return Err(anyhow!("TUN mode requires sing-box core. Switch to sing-box in Settings, or use Proxy mode with Xray."));
         }
 
         let auth = (self.proxy_auth_user.as_str(), self.proxy_auth_pass.as_str());
@@ -309,6 +309,9 @@ impl CoreManager {
                     self.write_stealth_config(stealth_mode);
                     self.signal_android_vpn(&format!("start:{}:{}:{}", socks_port, self.proxy_auth_user, self.proxy_auth_pass));
                 }
+
+
+
                 return Ok(());
             }
         }
@@ -329,6 +332,7 @@ impl CoreManager {
         // Signal Android VPN service to stop first
         #[cfg(target_os = "android")]
         self.signal_android_vpn("stop");
+
 
         if let Some(mut child) = self.process.lock().await.take() {
             log::info!("Stopping core process");
@@ -411,6 +415,8 @@ impl CoreManager {
         let status_path = nexvpn_dir.join(".vpn_status");
         std::fs::write(&status_path, status).ok();
     }
+
+    // ── tun2socks for Xray TUN on desktop ──────────
 
     // ── Logs ────────────────────────────────────────
 

@@ -5,44 +5,126 @@ use super::link_parser;
 use super::models::*;
 use crate::system::hwid;
 
-/// Extract subscription name from response headers.
-/// Priority: profile-title (base64 or plain) → content-disposition filename → None
-fn extract_name_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    // 1. profile-title header (used by most panels)
-    if let Some(val) = headers.get("profile-title") {
-        if let Ok(s) = val.to_str() {
-            let s = s.trim();
-            if let Some(b64) = s.strip_prefix("base64:") {
-                if let Ok(decoded) = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    b64.trim(),
-                ) {
-                    if let Ok(name) = String::from_utf8(decoded) {
-                        let name = name.trim().to_string();
-                        if !name.is_empty() {
-                            return Some(name);
-                        }
-                    }
-                }
-            } else if !s.is_empty() {
-                return Some(s.to_string());
+/// Decoded metadata from subscription response headers
+struct SubHeaderMeta {
+    name: Option<String>,
+    update_interval: Option<u64>,
+    upload: Option<u64>,
+    download: Option<u64>,
+    total: Option<u64>,
+    expire: Option<u64>,
+    web_page_url: Option<String>,
+    support_url: Option<String>,
+    announce: Option<String>,
+    refill_date: Option<u64>,
+}
+
+/// Decode a header value that may be base64-prefixed ("base64:...") or plain text
+fn decode_header_value(val: &str) -> String {
+    let val = val.trim();
+    if let Some(b64) = val.strip_prefix("base64:") {
+        if let Ok(decoded) = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            b64.trim(),
+        ) {
+            if let Ok(s) = String::from_utf8(decoded) {
+                return s.trim().to_string();
             }
         }
     }
+    val.to_string()
+}
 
-    // 2. content-disposition: attachment; filename=NAME
-    if let Some(val) = headers.get("content-disposition") {
-        if let Ok(s) = val.to_str() {
-            if let Some(pos) = s.find("filename=") {
-                let name = s[pos + 9..].trim_matches('"').trim().to_string();
-                if !name.is_empty() {
-                    return Some(name);
-                }
+/// Parse Subscription-Userinfo header: "upload=N; download=N; total=N; expire=N"
+fn parse_userinfo(header: &str) -> (Option<u64>, Option<u64>, Option<u64>, Option<u64>) {
+    let mut upload = None;
+    let mut download = None;
+    let mut total = None;
+    let mut expire = None;
+    for part in header.split(';') {
+        let part = part.trim();
+        if let Some((key, val)) = part.split_once('=') {
+            let val = val.trim();
+            match key.trim() {
+                "upload" => upload = val.parse().ok(),
+                "download" => download = val.parse().ok(),
+                "total" => total = val.parse().ok(),
+                "expire" => expire = val.parse().ok(),
+                _ => {}
             }
         }
     }
+    (upload, download, total, expire)
+}
 
-    None
+/// Extract all metadata from subscription response headers
+fn extract_header_meta(headers: &reqwest::header::HeaderMap) -> SubHeaderMeta {
+    // Name: profile-title → content-disposition filename
+    let name = headers
+        .get("profile-title")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| decode_header_value(s))
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            headers
+                .get("content-disposition")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.find("filename=").map(|pos| s[pos + 9..].trim_matches('"').trim().to_string()))
+                .filter(|s| !s.is_empty())
+        });
+
+    // Profile-Update-Interval (hours)
+    let update_interval = headers
+        .get("profile-update-interval")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok());
+
+    // Subscription-Userinfo
+    let (upload, download, total, expire) = headers
+        .get("subscription-userinfo")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| parse_userinfo(s))
+        .unwrap_or((None, None, None, None));
+
+    // Profile-Web-Page-Url
+    let web_page_url = headers
+        .get("profile-web-page-url")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // Support-Url
+    let support_url = headers
+        .get("support-url")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // Announce (may be base64-encoded)
+    let announce = headers
+        .get("announce")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| decode_header_value(s))
+        .filter(|s| !s.is_empty());
+
+    // Subscription-Refill-Date (unix timestamp)
+    let refill_date = headers
+        .get("subscription-refill-date")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok());
+
+    SubHeaderMeta {
+        name,
+        update_interval,
+        upload,
+        download,
+        total,
+        expire,
+        web_page_url,
+        support_url,
+        announce,
+        refill_date,
+    }
 }
 
 /// Fetch a subscription URL and parse its contents into servers
@@ -65,8 +147,8 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
 
     let resp = request.send().await?;
 
-    // Extract name from headers before consuming the response body
-    let header_name = extract_name_from_headers(resp.headers());
+    // Extract all metadata from headers before consuming the response body
+    let meta = extract_header_meta(resp.headers());
     let content = resp.text().await?;
 
     let sub_id = Uuid::new_v4().to_string();
@@ -82,7 +164,7 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
     // Name priority: explicit name → header name → domain from URL
     let resolved_name = if let Some(n) = name.filter(|n| !n.is_empty()) {
         n.to_string()
-    } else if let Some(n) = header_name {
+    } else if let Some(n) = meta.name {
         n
     } else {
         url::Url::parse(url)
@@ -102,12 +184,22 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
                 .unwrap()
                 .as_secs(),
         ),
+        update_interval: meta.update_interval,
+        upload: meta.upload,
+        download: meta.download,
+        total: meta.total,
+        expire: meta.expire,
+        web_page_url: meta.web_page_url,
+        support_url: meta.support_url,
+        announce: meta.announce,
+        refill_date: meta.refill_date,
     };
 
     log::info!(
-        "Fetched subscription '{}': {} servers",
+        "Fetched subscription '{}': {} servers, update_interval={}h",
         subscription.name,
-        servers.len()
+        servers.len(),
+        subscription.update_interval.unwrap_or(0),
     );
 
     Ok((subscription, servers))

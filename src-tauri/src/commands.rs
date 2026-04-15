@@ -59,6 +59,15 @@ pub struct SubscriptionInfo {
     pub url: String,
     pub server_count: usize,
     pub updated_at: Option<u64>,
+    pub update_interval: Option<u64>,
+    pub upload: Option<u64>,
+    pub download: Option<u64>,
+    pub total: Option<u64>,
+    pub expire: Option<u64>,
+    pub web_page_url: Option<String>,
+    pub support_url: Option<String>,
+    pub announce: Option<String>,
+    pub refill_date: Option<u64>,
 }
 
 impl SubscriptionInfo {
@@ -70,6 +79,15 @@ impl SubscriptionInfo {
             url: sub.url.clone(),
             server_count,
             updated_at: sub.updated_at,
+            update_interval: sub.update_interval,
+            upload: sub.upload,
+            download: sub.download,
+            total: sub.total,
+            expire: sub.expire,
+            web_page_url: sub.web_page_url.clone(),
+            support_url: sub.support_url.clone(),
+            announce: sub.announce.clone(),
+            refill_date: sub.refill_date,
         }
     }
 }
@@ -118,6 +136,53 @@ pub struct ServerUsageStat {
     pub protocol: String,
     pub connection_count: u32,
     pub total_traffic: u64,
+}
+
+// ── Human-readable error messages ─────────────────────
+
+fn humanize_core_error(raw: &str, tun_mode: bool) -> String {
+    let lower = raw.to_lowercase();
+
+    // TUN without admin rights
+    if tun_mode && (lower.contains("access denied") || lower.contains("permission denied")
+        || lower.contains("requires elevated") || lower.contains("operation not permitted")
+        || lower.contains("wintun") || lower.contains("administrator"))
+    {
+        return "TUN mode requires administrator rights. Click \"Run as Administrator\" in VPN settings, or switch to Proxy mode.".to_string();
+    }
+
+    // wintun.dll missing
+    if lower.contains("wintun.dll") || (tun_mode && lower.contains("not found") && lower.contains("dll")) {
+        return "wintun.dll not found. TUN mode needs this file next to the app. Download it from wintun.net or switch to Proxy mode.".to_string();
+    }
+
+    // TUN + Xray
+    if lower.contains("tun mode requires sing-box") {
+        return "TUN mode only works with sing-box core. Switch to sing-box in Settings, or use Proxy mode with Xray.".to_string();
+    }
+
+    // Port already in use
+    if lower.contains("address already in use") || lower.contains("bind") && lower.contains("failed") {
+        return "Port is already in use by another app. Try switching to automatic ports in Settings, or change ports manually.".to_string();
+    }
+
+    // Binary not found
+    if lower.contains("no such file") || lower.contains("cannot find") || lower.contains("not found") && (lower.contains("sing-box") || lower.contains("xray")) {
+        return "VPN core binary not found. Reinstall the app or check that core files are in the binaries folder.".to_string();
+    }
+
+    // Connection refused / timeout (server issue)
+    if lower.contains("connection refused") || lower.contains("connection timed out") || lower.contains("timed out") {
+        return "Cannot reach the server. It may be down, blocked, or your internet is offline.".to_string();
+    }
+
+    // DNS resolution failure
+    if lower.contains("could not resolve") || lower.contains("dns") && lower.contains("fail") {
+        return "Cannot resolve server address. Check your internet connection or try a different server.".to_string();
+    }
+
+    // Generic fallback with prefix
+    format!("Connection failed: {}", raw)
 }
 
 // ── Commands ───────────────────────────────────────────
@@ -215,7 +280,7 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
     ctx.core
         .start(&server, tun_mode, &routing_rules, &default_route, &per_app_mode, &per_app_list, stealth)
         .await
-        .map_err(|e| format!("Failed to start core: {}", e))?;
+        .map_err(|e| humanize_core_error(&e.to_string(), tun_mode))?;
 
     let http_port = ctx.core.http_port().await;
 
@@ -464,6 +529,15 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
                 .as_secs(),
         );
         existing.name = new_sub.name;
+        existing.update_interval = new_sub.update_interval;
+        existing.upload = new_sub.upload;
+        existing.download = new_sub.download;
+        existing.total = new_sub.total;
+        existing.expire = new_sub.expire;
+        existing.web_page_url = new_sub.web_page_url;
+        existing.support_url = new_sub.support_url;
+        existing.announce = new_sub.announce;
+        existing.refill_date = new_sub.refill_date;
     }
 
     save_state(&state);
@@ -1174,6 +1248,73 @@ fn format_epoch_date(epoch_secs: u64) -> String {
     let d = remaining + 1;
 
     format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// Get Xposed module status (Android only)
+#[derive(Serialize)]
+pub struct XposedStatus {
+    pub active: bool,
+    pub hooked_apps: Vec<String>,
+}
+
+#[tauri::command]
+pub fn get_xposed_status() -> XposedStatus {
+    #[cfg(target_os = "android")]
+    {
+        // Check 1: status file written by Xposed module from hooked apps
+        for base in &[
+            "/data/data/com.horusvpn.nexvpn/files",
+            "/data/user/0/com.horusvpn.nexvpn/files",
+        ] {
+            let path = std::path::PathBuf::from(base).join("nexvpn/.xposed_status");
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let apps: Vec<String> = content.lines()
+                    .filter_map(|line| {
+                        let (pkg, ts) = line.split_once(':')?;
+                        let ts: u64 = ts.parse().ok()?;
+                        if now - ts < 86_400_000 { Some(pkg.to_string()) } else { None }
+                    })
+                    .collect();
+                if !apps.is_empty() {
+                    return XposedStatus { active: true, hooked_apps: apps };
+                }
+            }
+        }
+
+        // Check 2: use root to read LSPosed module scope
+        if let Ok(output) = std::process::Command::new("su")
+            .args(["-c", "ls /data/adb/lsposed/config/ 2>/dev/null && cat /data/adb/lsposed/config/modules/com.horusvpn.nexvpn/scope.list 2>/dev/null || echo ''"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout).to_string();
+            if text.contains("modules") {
+                // LSPosed exists
+                let scope_apps: Vec<String> = text.lines()
+                    .filter(|l| !l.is_empty() && !l.contains("modules") && !l.contains("config"))
+                    .map(|l| l.trim().to_string())
+                    .collect();
+                if !scope_apps.is_empty() {
+                    return XposedStatus { active: true, hooked_apps: scope_apps };
+                }
+                return XposedStatus { active: false, hooked_apps: vec!["lsposed_detected".to_string()] };
+            }
+        }
+
+        // Check 3: fallback — check if lsposed dir exists via root
+        if let Ok(output) = std::process::Command::new("su")
+            .args(["-c", "test -d /data/adb/lsposed && echo yes || echo no"])
+            .output()
+        {
+            if String::from_utf8_lossy(&output.stdout).contains("yes") {
+                return XposedStatus { active: false, hooked_apps: vec!["lsposed_detected".to_string()] };
+            }
+        }
+    }
+    XposedStatus { active: false, hooked_apps: vec![] }
 }
 
 /// Get shareable link for a server
