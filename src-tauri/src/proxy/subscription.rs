@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use super::link_parser;
@@ -128,10 +129,10 @@ fn extract_header_meta(headers: &reqwest::header::HeaderMap) -> SubHeaderMeta {
 }
 
 /// Fetch a subscription URL and parse its contents into servers
-pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool) -> Result<(Subscription, Vec<Server>)> {
+pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool, app_logs: Option<Arc<tokio::sync::Mutex<Vec<String>>>>) -> Result<(Subscription, Vec<Server>)> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("NexVPN/1.0")
+        .user_agent(format!("NexVPN/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let mut request = client.get(url);
@@ -150,6 +151,31 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
     // Extract all metadata from headers before consuming the response body
     let meta = extract_header_meta(resp.headers());
     let content = resp.text().await?;
+
+    // Log each link parse result to app logs
+    if let Some(ref logs) = app_logs {
+        let decoded_content = link_parser::decode_subscription_content(&content);
+        let mut parsed_count = 0u32;
+        let mut skipped_count = 0u32;
+        for line in decoded_content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            let scheme = line.split("://").next().unwrap_or("?");
+            match link_parser::parse_link(line) {
+                Ok(s) => {
+                    parsed_count += 1;
+                    let msg = format!("✓ {} {:?} — {}", scheme, s.protocol, s.name);
+                    logs.lock().await.push(msg);
+                }
+                Err(e) => {
+                    skipped_count += 1;
+                    let msg = format!("✗ {} — {}", scheme, e);
+                    logs.lock().await.push(msg);
+                }
+            }
+        }
+        logs.lock().await.push(format!("Subscription: {} parsed, {} skipped", parsed_count, skipped_count));
+    }
 
     let sub_id = Uuid::new_v4().to_string();
     let mut servers = link_parser::parse_subscription_content(&content);

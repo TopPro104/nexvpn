@@ -4,10 +4,14 @@ import { useApp } from "../../context/AppContext";
 import { Button } from "../ui/Button";
 import { t } from "../../i18n/translations";
 
+type LogTab = "core" | "app";
+
 export function LogsPage() {
   const { state } = useApp();
   void state.langTick;
-  const [logs, setLogs] = useState<string[]>([]);
+  const [coreLogs, setCoreLogs] = useState<string[]>([]);
+  const [appLogs, setAppLogs] = useState<string[]>([]);
+  const [logTab, setLogTab] = useState<LogTab>("core");
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -15,8 +19,12 @@ export function LogsPage() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const data = await api.getLogs();
-        setLogs(data);
+        const [core, app] = await Promise.all([
+          api.getLogs(),
+          api.getAppLogs(),
+        ]);
+        setCoreLogs(core);
+        setAppLogs(app);
       } catch {
         // ignore
       }
@@ -25,6 +33,8 @@ export function LogsPage() {
     const id = setInterval(poll, 1500);
     return () => clearInterval(id);
   }, []);
+
+  const logs = logTab === "core" ? coreLogs : appLogs;
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
@@ -37,7 +47,7 @@ export function LogsPage() {
   if (state.logsFilter === "errors") {
     levelFiltered = logs.filter((l) => {
       const lower = l.toLowerCase();
-      return lower.includes("error") || lower.includes("fatal");
+      return lower.includes("error") || lower.includes("fatal") || l.startsWith("✗");
     });
   } else if (state.logsFilter === "warnings") {
     levelFiltered = logs.filter((l) => l.toLowerCase().includes("warn"));
@@ -48,8 +58,13 @@ export function LogsPage() {
     : levelFiltered;
 
   const handleClear = async () => {
-    await api.clearLogs();
-    setLogs([]);
+    if (logTab === "core") {
+      await api.clearLogs();
+      setCoreLogs([]);
+    } else {
+      await api.clearAppLogs();
+      setAppLogs([]);
+    }
   };
 
   const handleCopy = () => {
@@ -57,6 +72,8 @@ export function LogsPage() {
   };
 
   const getLineClass = (line: string) => {
+    if (line.startsWith("✗")) return "log-error";
+    if (line.startsWith("✓")) return "log-info";
     const lower = line.toLowerCase();
     if (lower.includes("error") || lower.includes("fatal")) return "log-error";
     if (lower.includes("warn")) return "log-warn";
@@ -69,6 +86,21 @@ export function LogsPage() {
       <div className="logs-header">
         <h2>{t("nav.logs")}</h2>
         <div className="logs-actions">
+          <div className="logs-tabs">
+            <button
+              className={`logs-tab${logTab === "core" ? " active" : ""}`}
+              onClick={() => setLogTab("core")}
+            >
+              {t("logs.core")}
+            </button>
+            <button
+              className={`logs-tab${logTab === "app" ? " active" : ""}`}
+              onClick={() => setLogTab("app")}
+            >
+              {t("logs.app")}
+              {appLogs.length > 0 && <span className="logs-tab-badge">{appLogs.length}</span>}
+            </button>
+          </div>
           <input
             className="search-input logs-filter"
             placeholder={t("logs.filter")}
@@ -93,7 +125,9 @@ export function LogsPage() {
       </div>
       <div className="logs-container" ref={containerRef}>
         {filtered.length === 0 ? (
-          <div className="logs-empty">{t("logs.empty")}</div>
+          <div className="logs-empty">
+            {logTab === "core" ? t("logs.empty") : t("logs.appEmpty")}
+          </div>
         ) : (
           filtered.map((line, i) => (
             <div key={i} className={`log-line ${getLineClass(line)}`}>

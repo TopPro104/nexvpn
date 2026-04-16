@@ -56,7 +56,7 @@ pub fn get_device_info() -> DeviceInfo {
         platform: "Windows".to_string(),
         os_version: get_os_version(),
         model: get_device_model(),
-        user_agent: "NexVPN/1.0".to_string(),
+        user_agent: format!("NexVPN/{}", env!("CARGO_PKG_VERSION")),
     }
 }
 
@@ -84,7 +84,7 @@ pub fn get_device_info() -> DeviceInfo {
         platform: "Android".to_string(),
         os_version,
         model: format!("{} {}", manufacturer, model_name),
-        user_agent: "NexVPN/1.0".to_string(),
+        user_agent: format!("NexVPN/{}", env!("CARGO_PKG_VERSION")),
     }
 }
 
@@ -143,7 +143,7 @@ pub fn get_device_info() -> DeviceInfo {
         platform: "macOS".to_string(),
         os_version,
         model,
-        user_agent: "NexVPN/1.0".to_string(),
+        user_agent: format!("NexVPN/{}", env!("CARGO_PKG_VERSION")),
     }
 }
 
@@ -162,6 +162,6 @@ pub fn get_device_info() -> DeviceInfo {
         platform: "Linux".to_string(),
         os_version: "Unknown".to_string(),
         model: "Desktop".to_string(),
-        user_agent: "NexVPN/1.0".to_string(),
+        user_agent: format!("NexVPN/{}", env!("CARGO_PKG_VERSION")),
     }
 }

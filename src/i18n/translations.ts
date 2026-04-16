@@ -65,7 +65,7 @@ const translations = {
   "subs.unlimited": { en: "Unlimited", ru: "Безлимит" },
   "subs.expires": { en: "Expires", ru: "Истекает" },
   "subs.expired": { en: "Expired", ru: "Истекла" },
-  "subs.refill": { en: "Refill", ru: "Продление" },
+  "subs.refill": { en: "Traffic reset", ru: "Сброс трафика" },
   "subs.support": { en: "Support", ru: "Поддержка" },
   "subs.manage": { en: "Manage", ru: "Управление" },
   "subs.autoUpdate": { en: "Auto-update", ru: "Автообновление" },
@@ -136,7 +136,10 @@ const translations = {
   "logs.autoScroll": { en: "Auto-scroll", ru: "Автоскролл" },
   "logs.copy": { en: "Copy", ru: "Копировать" },
   "logs.clear": { en: "Clear", ru: "Очистить" },
+  "logs.core": { en: "Core", ru: "Ядро" },
+  "logs.app": { en: "App", ru: "Приложение" },
   "logs.empty": { en: "No logs yet. Connect to a server to see core output.", ru: "Логов пока нет. Подключитесь к серверу, чтобы увидеть вывод ядра." },
+  "logs.appEmpty": { en: "No app logs yet. Update a subscription to see parsing results.", ru: "Логов приложения пока нет. Обновите подписку, чтобы увидеть результат парсинга." },
 
   // Animation
   "settings.animation": { en: "Animation", ru: "Анимация" },
@@ -199,6 +202,8 @@ const translations = {
   "common.add": { en: "Add", ru: "Добавить" },
   "common.cancel": { en: "Cancel", ru: "Отмена" },
   "common.import": { en: "Import", ru: "Импорт" },
+  "common.confirm": { en: "Confirm", ru: "Подтверждение" },
+  "common.yes": { en: "Yes", ru: "Да" },
 
   // Toast messages
   "toast.disconnected": { en: "Disconnected", ru: "Отключено" },

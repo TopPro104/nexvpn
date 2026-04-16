@@ -12,6 +12,22 @@ use crate::testing::ping;
 pub struct AppContext {
     pub core: CoreManager,
     pub state: Arc<Mutex<AppState>>,
+    /// App-level log buffer (subscription parsing, errors, etc.)
+    pub app_logs: Arc<Mutex<Vec<String>>>,
+}
+
+/// Push a log line to the app log buffer
+pub fn app_log(ctx: &AppContext, msg: String) {
+    let logs = ctx.app_logs.clone();
+    log::info!("[APP] {}", msg);
+    tauri::async_runtime::spawn(async move {
+        let mut buf = logs.lock().await;
+        buf.push(msg);
+        let blen = buf.len();
+        if blen > 500 {
+            buf.drain(0..blen - 400);
+        }
+    });
 }
 
 // ── Response types ─────────────────────────────────────
@@ -221,7 +237,7 @@ pub async fn add_subscription(
     name: Option<String>,
 ) -> Result<Vec<ServerInfo>, String> {
     let hwid_enabled = ctx.state.lock().await.settings.hwid_enabled;
-    let (sub, servers) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled)
+    let (sub, servers) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to fetch subscription: {}", e))?;
 
@@ -499,7 +515,7 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
     let hwid_enabled = state.settings.hwid_enabled;
     drop(state);
 
-    let (new_sub, new_servers) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled)
+    let (new_sub, new_servers) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to update subscription: {}", e))?;
 
@@ -710,6 +726,19 @@ pub async fn get_logs(ctx: State<'_, AppContext>) -> Result<Vec<String>, String>
 #[tauri::command]
 pub async fn clear_logs(ctx: State<'_, AppContext>) -> Result<(), String> {
     ctx.core.clear_logs().await;
+    Ok(())
+}
+
+/// Get app-level logs
+#[tauri::command]
+pub async fn get_app_logs(ctx: State<'_, AppContext>) -> Result<Vec<String>, String> {
+    Ok(ctx.app_logs.lock().await.clone())
+}
+
+/// Clear app-level logs
+#[tauri::command]
+pub async fn clear_app_logs(ctx: State<'_, AppContext>) -> Result<(), String> {
+    ctx.app_logs.lock().await.clear();
     Ok(())
 }
 

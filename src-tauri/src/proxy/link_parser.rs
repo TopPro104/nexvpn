@@ -16,6 +16,8 @@ pub fn parse_link(link: &str) -> Result<Server> {
         parse_shadowsocks(link)
     } else if link.starts_with("trojan://") {
         parse_trojan(link)
+    } else if link.starts_with("hy2://") || link.starts_with("hysteria2://") {
+        parse_hysteria2(link)
     } else {
         Err(anyhow!("Unsupported link format: {}", &link[..20.min(link.len())]))
     }
@@ -28,6 +30,18 @@ pub fn parse_links(text: &str) -> Vec<Server> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .filter_map(|l| parse_link(l).ok())
         .collect()
+}
+
+/// Decode base64 subscription content to plain text
+pub fn decode_subscription_content(content: &str) -> String {
+    let decoded = general_purpose::STANDARD
+        .decode(content.trim())
+        .or_else(|_| general_purpose::URL_SAFE.decode(content.trim()))
+        .or_else(|_| general_purpose::URL_SAFE_NO_PAD.decode(content.trim()));
+    match decoded {
+        Ok(bytes) => String::from_utf8(bytes).unwrap_or_else(|_| content.to_string()),
+        Err(_) => content.to_string(),
+    }
 }
 
 /// Decode base64 subscription content, then parse links
@@ -361,6 +375,60 @@ fn parse_trojan(link: &str) -> Result<Server> {
         alter_id: None,
         transport,
         ws,
+        grpc: None,
+        xhttp: None,
+        httpupgrade: None,
+        tls,
+        subscription_id: None,
+        latency_ms: None,
+        favorite: false,
+    })
+}
+
+// ── Hysteria2 ─────────────────────────────────────────
+
+fn parse_hysteria2(link: &str) -> Result<Server> {
+    // hy2://password@host:port?params#name
+    // hysteria2://password@host:port?params#name
+    let normalized = if link.starts_with("hy2://") {
+        link.replacen("hy2://", "hysteria2://", 1)
+    } else {
+        link.to_string()
+    };
+    let url = Url::parse(&normalized)?;
+
+    let password = url.username().to_string();
+    let host = url.host_str().ok_or(anyhow!("No host"))?.to_string();
+    let port = url.port().unwrap_or(443);
+    let name = percent_decode(url.fragment().unwrap_or("Hysteria2 Server"));
+
+    let params = QueryParams::from_url(&url);
+
+    let tls = TlsSettings {
+        enabled: true,
+        server_name: params.get("sni"),
+        insecure: params.get("insecure").as_deref() == Some("1"),
+        alpn: params
+            .get("alpn")
+            .map(|a| a.split(',').map(String::from).collect())
+            .unwrap_or_else(|| vec!["h3".to_string()]),
+        fingerprint: params.get("fp"),
+        reality: None,
+    };
+
+    Ok(Server {
+        id: Uuid::new_v4().to_string(),
+        name,
+        address: host,
+        port,
+        protocol: Protocol::Hysteria2,
+        uuid: None,
+        password: Some(password),
+        method: None,
+        flow: None,
+        alter_id: None,
+        transport: Transport::Quic,
+        ws: None,
         grpc: None,
         xhttp: None,
         httpupgrade: None,

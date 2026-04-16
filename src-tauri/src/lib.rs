@@ -38,6 +38,7 @@ pub fn run() {
     let app_context = AppContext {
         core: core_manager,
         state: Arc::new(Mutex::new(state)),
+        app_logs: Arc::new(Mutex::new(Vec::new())),
     };
 
     let mut builder = tauri::Builder::default()
@@ -157,6 +158,8 @@ pub fn run() {
             commands::save_settings,
             commands::get_logs,
             commands::clear_logs,
+            commands::get_app_logs,
+            commands::clear_app_logs,
             commands::get_connection_history,
             commands::clear_connection_history,
             commands::get_device_info,
@@ -179,6 +182,7 @@ pub fn run() {
             commands::get_installed_apps,
             commands::ping_through_vpn,
             commands::get_server_link,
+            commands::get_xposed_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NexVPN");

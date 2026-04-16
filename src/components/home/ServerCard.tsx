@@ -5,6 +5,7 @@ import { Flag } from "../ui/Flag";
 import { extractCountryCode } from "../../utils/countryUtils";
 import { StarIcon, StarFilledIcon } from "../ui/Icons";
 import { t } from "../../i18n/translations";
+import { showConfirm } from "../../utils/confirm";
 
 const PROTO_COLORS: Record<string, string> = {
   vless: "#5b9aff",
@@ -65,7 +66,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`${t("servers.confirmDelete")} "${server.name}"?`)) return;
+    if (!await showConfirm(`${t("servers.confirmDelete")} "${server.name}"?`)) return;
     try {
       await api.removeServer(server.id);
       dispatch({ type: "REMOVE_SERVER", id: server.id });

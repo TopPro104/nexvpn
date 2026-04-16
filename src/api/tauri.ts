@@ -196,6 +196,10 @@ export const api = {
 
   clearLogs: () => invoke<void>("clear_logs"),
 
+  getAppLogs: () => invoke<string[]>("get_app_logs"),
+
+  clearAppLogs: () => invoke<void>("clear_app_logs"),
+
   getConnectionHistory: () =>
     invoke<ConnectionRecord[]>("get_connection_history"),
 

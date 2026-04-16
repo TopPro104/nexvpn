@@ -5,6 +5,7 @@ import { Button } from "../ui/Button";
 import { Spinner } from "../ui/Spinner";
 import { AddSubModal } from "./AddSubModal";
 import { t } from "../../i18n/translations";
+import { showConfirm } from "../../utils/confirm";
 import {
   BarChartIcon,
   CalendarIcon,
@@ -140,10 +141,7 @@ export function SubList() {
   const handleDelete = async (id: string) => {
     const sub = state.subscriptions.find((s) => s.id === id);
     if (!sub) return;
-    const confirmed = window.confirm(
-      `${t("subs.confirmDelete")} "${sub.name}"?\n${sub.server_count} ${t("subs.servers")} ${t("subs.willBeRemoved")}`
-    );
-    if (!confirmed) return;
+    if (!await showConfirm(`${t("subs.confirmDelete")} "${sub.name}"?\n${sub.server_count} ${t("subs.servers")} ${t("subs.willBeRemoved")}`)) return;
 
     setDeletingId(id);
     try {

@@ -14,6 +14,7 @@ import { StatsPage } from "./components/stats/StatsPage";
 import { RoutingPage } from "./components/routing/RoutingPage";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { ToastStack } from "./components/ui/Toast";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { useCallback, useRef, useEffect, useState } from "react";
 import { StatusResponse, SubscriptionInfo, api } from "./api/tauri";
 import { onOpenUrl, getCurrent as getDeepLinkUrls } from "@tauri-apps/plugin-deep-link";
@@ -326,6 +327,7 @@ function AppContent() {
     <Layout>
       {renderPage()}
       <ToastStack />
+      <ConfirmDialog />
       {showOnboarding && (
         <OnboardingOverlay onComplete={() => setShowOnboarding(false)} />
       )}
