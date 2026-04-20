@@ -315,9 +315,12 @@ impl CoreManager {
                     self.signal_android_vpn(&format!("start:{}:{}:{}", socks_port, self.proxy_auth_user, self.proxy_auth_pass));
                 }
 
+                #[cfg(not(target_os = "android"))]
                 if needs_xray_bridge {
                     self.start_xray_tun_bridge(socks_port, &server.address).await?;
                 }
+                #[cfg(target_os = "android")]
+                let _ = needs_xray_bridge;
 
                 return Ok(());
             }

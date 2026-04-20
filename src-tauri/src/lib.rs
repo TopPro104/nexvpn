@@ -2,6 +2,7 @@ use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 
+mod app_logger;
 mod commands;
 mod core;
 mod proxy;
@@ -15,7 +16,7 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    // Logger will be installed below once app_logs buffer exists
 
     // Safety: if we crash or exit, always disable system proxy (desktop only)
     #[cfg(not(target_os = "android"))]
@@ -35,10 +36,13 @@ pub fn run() {
     let saved_socks = state.settings.socks_port;
     let saved_http = state.settings.http_port;
 
+    let app_logs = Arc::new(Mutex::new(Vec::new()));
+    app_logger::init(app_logs.clone());
+
     let app_context = AppContext {
         core: core_manager,
         state: Arc::new(Mutex::new(state)),
-        app_logs: Arc::new(Mutex::new(Vec::new())),
+        app_logs,
     };
 
     let mut builder = tauri::Builder::default()
@@ -179,6 +183,7 @@ pub fn run() {
             commands::get_server_usage_stats,
             commands::read_tile_action,
             commands::get_active_server_id,
+            commands::set_selected_server,
             commands::get_installed_apps,
             commands::ping_through_vpn,
             commands::get_server_link,
