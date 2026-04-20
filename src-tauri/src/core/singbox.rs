@@ -177,6 +177,92 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
     Ok(config)
 }
 
+/// Generate a minimal sing-box bridge config: TUN inbound → SOCKS outbound to Xray.
+/// Used when user selects Xray core + TUN mode on desktop (Xray has no native TUN).
+/// Pattern: v2rayN / nekoray — Xray handles the protocol, sing-box handles TUN.
+pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Value {
+    // Is server.address an IP literal or a hostname?
+    let server_is_ip = server_address.parse::<std::net::IpAddr>().is_ok();
+    let bypass_domain: Vec<String> = if !server_is_ip { vec![server_address.to_string()] } else { vec![] };
+    let bypass_ip: Vec<String> = if server_is_ip {
+        let is_v6 = server_address.parse::<std::net::Ipv6Addr>().is_ok();
+        vec![format!("{}/{}", server_address, if is_v6 { 128 } else { 32 })]
+    } else { vec![] };
+
+    // macOS expects utun{N}; Windows/Linux use a free name.
+    // v2rayN picks a random utun index to avoid conflicts with other VPN apps.
+    let interface_name: String = if cfg!(target_os = "macos") {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        format!("utun{}", (seed % 90) + 10)
+    } else {
+        "singbox_tun".to_string()
+    };
+
+    // Without bypassing the VPN server address, Xray's outbound connection to the real
+    // server hits the TUN → loops back into Xray forever. v2rayN calls this ProtectDomainList.
+    let mut dns_rules: Vec<Value> = vec![];
+    if !bypass_domain.is_empty() {
+        dns_rules.push(json!({ "domain": bypass_domain.clone(), "server": "local" }));
+    }
+    let mut route_rules: Vec<Value> = vec![
+        json!({ "action": "sniff" }),
+        json!({ "protocol": "dns", "action": "hijack-dns" }),
+    ];
+    if !bypass_domain.is_empty() {
+        route_rules.push(json!({ "domain": bypass_domain.clone(), "outbound": "direct" }));
+    }
+    if !bypass_ip.is_empty() {
+        route_rules.push(json!({ "ip_cidr": bypass_ip.clone(), "outbound": "direct" }));
+    }
+    route_rules.push(json!({ "network": "udp", "port": [135, 137, 138, 139, 5353], "action": "reject" }));
+    route_rules.push(json!({ "ip_cidr": ["224.0.0.0/3", "ff00::/8"], "action": "reject" }));
+
+    // Matches v2rayN's tun_singbox_dns / tun_singbox_inbound / tun_singbox_rules templates.
+    // "proxy" tag is renamed to "to-xray" — it's the SOCKS outbound pointing at Xray.
+    json!({
+        "log": { "level": "error", "timestamp": true },
+        "dns": {
+            "servers": [
+                { "tag": "remote", "type": "tcp", "server": "8.8.8.8", "detour": "to-xray" },
+                { "tag": "local", "type": "udp", "server": "223.5.5.5" }
+            ],
+            "rules": dns_rules,
+            "final": "remote",
+            "independent_cache": true
+        },
+        "inbounds": [{
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": interface_name,
+            "address": ["172.18.0.1/30", "fdfe:dcba:9876::1/126"],
+            "mtu": 9000,
+            "auto_route": true,
+            "strict_route": false,
+            "stack": "system",
+            "sniff": true
+        }],
+        "outbounds": [
+            {
+                "type": "socks",
+                "tag": "to-xray",
+                "server": "127.0.0.1",
+                "server_port": xray_socks_port,
+                "version": "5"
+            },
+            { "type": "direct", "tag": "direct" }
+        ],
+        "route": {
+            "rules": route_rules,
+            "final": "to-xray",
+            "auto_detect_interface": true,
+            "default_domain_resolver": { "server": "local" }
+        }
+    })
+}
+
 fn build_outbound(server: &Server) -> Result<Value> {
     let mut out = json!({
         "tag": "proxy",

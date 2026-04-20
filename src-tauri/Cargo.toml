@@ -34,3 +34,4 @@ tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
+md5 = "0.7"

@@ -14,6 +14,9 @@ use super::{singbox, xray};
 
 pub struct CoreManager {
     process: Arc<Mutex<Option<Child>>>,
+    /// sing-box TUN bridge process, used only when core_type==Xray && tun_mode on desktop.
+    /// Xray has no native TUN — sing-box handles TUN inbound and forwards to Xray's SOCKS.
+    bridge_process: Arc<Mutex<Option<Child>>>,
     config_dir: PathBuf,
     core_type: Arc<Mutex<CoreType>>,
     socks_port: Arc<Mutex<u16>>,
@@ -99,6 +102,7 @@ impl CoreManager {
 
         Self {
             process: Arc::new(Mutex::new(None)),
+            bridge_process: Arc::new(Mutex::new(None)),
             config_dir: data_dir,
             core_type: Arc::new(Mutex::new(CoreType::SingBox)),
             socks_port: Arc::new(Mutex::new(10808)),
@@ -179,12 +183,13 @@ impl CoreManager {
         let socks_port = *self.socks_port.lock().await;
         let http_port = *self.http_port.lock().await;
 
-        // On Android, TUN is handled by VpnService + tun2socks, so both cores work.
-        // On desktop, TUN is only supported by sing-box (xray has no TUN inbound).
+        // On Android: TUN is handled by VpnService + tun2socks (both cores work).
+        // On desktop: sing-box has native TUN; Xray has none — we spawn sing-box as a
+        // TUN→SOCKS bridge in front of Xray (v2rayN / nekoray pattern).
         #[cfg(not(target_os = "android"))]
-        if tun_mode && core_type == CoreType::Xray {
-            return Err(anyhow!("TUN mode requires sing-box core. Switch to sing-box in Settings, or use Proxy mode with Xray."));
-        }
+        let needs_xray_bridge = tun_mode && core_type == CoreType::Xray;
+        #[cfg(target_os = "android")]
+        let needs_xray_bridge = false;
 
         let auth = (self.proxy_auth_user.as_str(), self.proxy_auth_pass.as_str());
         let clash_secret = self.clash_api_secret.as_str();
@@ -310,7 +315,9 @@ impl CoreManager {
                     self.signal_android_vpn(&format!("start:{}:{}:{}", socks_port, self.proxy_auth_user, self.proxy_auth_pass));
                 }
 
-
+                if needs_xray_bridge {
+                    self.start_xray_tun_bridge(socks_port, &server.address).await?;
+                }
 
                 return Ok(());
             }
@@ -333,6 +340,12 @@ impl CoreManager {
         #[cfg(target_os = "android")]
         self.signal_android_vpn("stop");
 
+        // Stop sing-box bridge before main core so TUN routes clear while SOCKS is still up
+        if let Some(mut child) = self.bridge_process.lock().await.take() {
+            log::info!("Stopping sing-box TUN bridge");
+            child.kill().await.ok();
+            child.wait().await.ok();
+        }
 
         if let Some(mut child) = self.process.lock().await.take() {
             log::info!("Stopping core process");
@@ -416,7 +429,64 @@ impl CoreManager {
         std::fs::write(&status_path, status).ok();
     }
 
-    // ── tun2socks for Xray TUN on desktop ──────────
+    // ── sing-box TUN bridge for Xray on desktop ──────────
+
+    /// Spawn sing-box as a TUN→SOCKS bridge in front of Xray.
+    /// Called only after Xray's SOCKS inbound is confirmed reachable.
+    #[cfg(not(target_os = "android"))]
+    async fn start_xray_tun_bridge(&self, xray_socks_port: u16, server_address: &str) -> Result<()> {
+        // Windows: remove stale Wintun device so sing-box can create a fresh one.
+        // Without this, a crashed previous run leaves a zombie adapter that blocks startup.
+        #[cfg(target_os = "windows")]
+        Self::cleanup_wintun_device("nexvpn-tun");
+
+        let bridge_bin = self.resolve_binary(&CoreType::SingBox).await
+            .map_err(|e| anyhow!("TUN mode with Xray requires sing-box binary alongside the app: {}", e))?;
+
+        let config = super::singbox::generate_bridge_config(xray_socks_port, server_address);
+        let config_path = self.config_dir.join("running_bridge.json");
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)
+            .map_err(|e| anyhow!("Cannot write bridge config: {}", e))?;
+
+        log::info!("Starting sing-box TUN bridge → SOCKS 127.0.0.1:{}", xray_socks_port);
+
+        let mut child = spawn_hidden(&bridge_bin, &["run", "-c", config_path.to_str().unwrap()])?;
+        self.spawn_log_reader(child.stdout.take(), "BRIDGE-OUT");
+        self.spawn_log_reader(child.stderr.take(), "BRIDGE-ERR");
+
+        // Short health check: if bridge exits within 1s, it failed (usually lack of admin rights)
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(anyhow!(
+                "TUN bridge (sing-box) exited with status {}. TUN mode typically requires administrator/root privileges.",
+                status
+            ));
+        }
+
+        *self.bridge_process.lock().await = Some(child);
+        Ok(())
+    }
+
+    /// Remove a leftover Wintun adapter by name. Uses pnputil with a GUID derived from
+    /// MD5(interface_name) — this matches v2rayN's scheme since sing-box uses the same.
+    #[cfg(target_os = "windows")]
+    fn cleanup_wintun_device(interface_name: &str) {
+        // sing-box names wintun adapters with a prefix — also try the raw name
+        for name in &[format!("wintun{}", interface_name), interface_name.to_string()] {
+            let digest = md5::compute(name.as_bytes());
+            let b = digest.0;
+            let guid = format!(
+                "{{{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}}}",
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+            );
+            let arg = format!("SWD\\Wintun\\{}", guid);
+            let _ = std::process::Command::new(r"C:\Windows\System32\pnputil.exe")
+                .args(["/remove-device", &arg])
+                .output();
+        }
+    }
+
 
     // ── Logs ────────────────────────────────────────
 
