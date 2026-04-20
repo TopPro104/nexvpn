@@ -1218,6 +1218,15 @@ pub async fn get_active_server_id(ctx: State<'_, AppContext>) -> Result<Option<S
     Ok(state.active_server_id.clone())
 }
 
+/// Save the selected server ID (persisted across restarts, even without connecting)
+#[tauri::command]
+pub async fn set_selected_server(ctx: State<'_, AppContext>, server_id: Option<String>) -> Result<(), String> {
+    let mut state = ctx.state.lock().await;
+    state.active_server_id = server_id;
+    save_state(&state);
+    Ok(())
+}
+
 /// Read and clear tile action file (Android Quick Settings Tile)
 #[tauri::command]
 pub fn read_tile_action() -> Option<String> {
