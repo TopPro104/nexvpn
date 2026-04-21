@@ -129,10 +129,17 @@ fn extract_header_meta(headers: &reqwest::header::HeaderMap) -> SubHeaderMeta {
 }
 
 /// Fetch a subscription URL and parse its contents into servers
-pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool, app_logs: Option<Arc<tokio::sync::Mutex<Vec<String>>>>) -> Result<(Subscription, Vec<Server>)> {
+pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool, happ_ua: bool, app_logs: Option<Arc<tokio::sync::Mutex<Vec<String>>>>) -> Result<(Subscription, Vec<Server>)> {
+    // Some providers gate by UA and only serve known clients; toggle Happ prefix
+    // lets the user enable/disable impersonation from settings.
+    let ua = if happ_ua {
+        format!("Happ/3.18.1 NexVPN/{}", env!("CARGO_PKG_VERSION"))
+    } else {
+        format!("NexVPN/{}", env!("CARGO_PKG_VERSION"))
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent(format!("NexVPN/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(ua)
         .build()?;
 
     let mut request = client.get(url);

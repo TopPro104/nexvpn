@@ -39,6 +39,8 @@ pub struct ServerInfo {
     pub address: String,
     pub port: u16,
     pub protocol: String,
+    pub transport: String,
+    pub security: String,
     pub latency_ms: Option<u32>,
     pub subscription_id: Option<String>,
     pub favorite: bool,
@@ -46,12 +48,22 @@ pub struct ServerInfo {
 
 impl From<&Server> for ServerInfo {
     fn from(s: &Server) -> Self {
+        let transport = format!("{:?}", s.transport).to_lowercase();
+        let security = if s.tls.reality.is_some() {
+            "reality".to_string()
+        } else if s.tls.enabled {
+            "tls".to_string()
+        } else {
+            "none".to_string()
+        };
         ServerInfo {
             id: s.id.clone(),
             name: s.name.clone(),
             address: s.address.clone(),
             port: s.port,
             protocol: format!("{:?}", s.protocol).to_lowercase(),
+            transport,
+            security,
             latency_ms: s.latency_ms,
             subscription_id: s.subscription_id.clone(),
             favorite: s.favorite,
@@ -236,8 +248,11 @@ pub async fn add_subscription(
     url: String,
     name: Option<String>,
 ) -> Result<Vec<ServerInfo>, String> {
-    let hwid_enabled = ctx.state.lock().await.settings.hwid_enabled;
-    let (sub, servers) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled, Some(ctx.app_logs.clone()))
+    let (hwid_enabled, happ_ua) = {
+        let s = &ctx.state.lock().await.settings;
+        (s.hwid_enabled, s.happ_ua)
+    };
+    let (sub, servers) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to fetch subscription: {}", e))?;
 
@@ -513,9 +528,10 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
         .cloned()
         .ok_or("Subscription not found")?;
     let hwid_enabled = state.settings.hwid_enabled;
+    let happ_ua = state.settings.happ_ua;
     drop(state);
 
-    let (new_sub, new_servers) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled, Some(ctx.app_logs.clone()))
+    let (new_sub, new_servers) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to update subscription: {}", e))?;
 

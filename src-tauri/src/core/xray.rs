@@ -156,6 +156,16 @@ fn build_outbound(server: &Server) -> Result<Value> {
                 }]
             });
         }
+        Protocol::Hysteria2 => {
+            // Xray-core v26.1.23+ native Hysteria2 — protocol "hysteria" version 2;
+            // transport "hysteria" carries auth. See xtls.github.io/en/config/outbounds/hysteria.html
+            out["protocol"] = json!("hysteria");
+            out["settings"] = json!({
+                "version": 2,
+                "address": server.address,
+                "port": server.port
+            });
+        }
         _ => {
             return Err(anyhow::anyhow!(
                 "Protocol {:?} not supported by Xray-core",
@@ -167,7 +177,17 @@ fn build_outbound(server: &Server) -> Result<Value> {
     // Stream settings
     let mut stream = json!({});
 
+    // Hysteria2 forces its own transport regardless of server.transport.
+    if matches!(server.protocol, Protocol::Hysteria2) {
+        stream["network"] = json!("hysteria");
+        stream["hysteriaSettings"] = json!({
+            "version": 2,
+            "auth": server.password.as_deref().unwrap_or("")
+        });
+    }
+
     // Transport
+    if !matches!(server.protocol, Protocol::Hysteria2) {
     match server.transport {
         Transport::Ws => {
             stream["network"] = json!("ws");
@@ -219,6 +239,7 @@ fn build_outbound(server: &Server) -> Result<Value> {
             stream["httpupgradeSettings"] = settings;
         }
         _ => {}
+    }
     }
 
     // TLS

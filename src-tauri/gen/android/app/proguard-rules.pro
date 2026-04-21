@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep Xposed module class (referenced by name in assets/xposed_init)
+-keep class com.horusvpn.nexvpn.xposed.** { *; }
+-keep class de.robv.android.xposed.** { *; }
+-dontwarn de.robv.android.xposed.**
+# Prevent R8 from removing "unused" Xposed hooks
+-keepclassmembers class com.horusvpn.nexvpn.xposed.** {
+    public *;
+    private *;
+}

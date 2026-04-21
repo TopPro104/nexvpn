@@ -88,6 +88,13 @@ class MainActivity : TauriActivity() {
         // Request battery optimization exemption (keeps VPN alive in background)
         requestBatteryOptimizationExemption()
 
+        // Make nexvpn dir world-writable so Xposed module (running in other processes) can write status
+        val nexvpnDir = File(filesDir, "nexvpn")
+        nexvpnDir.mkdirs()
+        nexvpnDir.setReadable(true, false)
+        nexvpnDir.setWritable(true, false)
+        nexvpnDir.setExecutable(true, false)
+
         // Generate installed apps list with icons (for per-app VPN UI)
         Thread {
             writeInstalledAppsJson()

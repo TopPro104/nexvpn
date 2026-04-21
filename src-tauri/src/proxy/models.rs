@@ -170,6 +170,10 @@ pub struct Settings {
     /// Package names for per-app VPN
     #[serde(default)]
     pub per_app_list: Vec<String>,
+    /// Include "Happ/3.18.1" in subscription fetch User-Agent — required by some
+    /// providers that gate by client UA. Default on.
+    #[serde(default = "default_true")]
+    pub happ_ua: bool,
 }
 
 fn default_style() -> String { "default".to_string() }
@@ -196,6 +200,7 @@ impl Default for Settings {
             stealth_mode: false,
             per_app_mode: "all".to_string(),
             per_app_list: Vec::new(),
+            happ_ua: true,
         }
     }
 }

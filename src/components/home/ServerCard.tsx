@@ -31,6 +31,15 @@ function pingPercent(ms: number | null): number {
   return Math.round(100 - ((ms - 50) / 450) * 95);
 }
 
+/** "vless · tcp + reality", "hysteria2 · quic + tls". Keeps the protocol short
+ * and adds the on-wire transport + security so the user can spot stealth configs. */
+function stackLabel(s: { protocol: string; transport: string; security: string }): string {
+  // Hysteria2 is always over QUIC, but "hysteria" reads as the distinctive feature.
+  const transport = s.protocol === "hysteria2" ? "hysteria" : s.transport;
+  const sec = s.security === "none" ? "" : ` + ${s.security}`;
+  return `${transport}${sec}`;
+}
+
 function pingClass(ms: number | null): string {
   if (ms == null) return "";
   if (ms < 150) return "good";
@@ -49,6 +58,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
 
   const handleSelect = () => {
     dispatch({ type: "SELECT_SERVER", id: server.id });
+    api.setSelectedServer(server.id);
   };
 
   const handleDoubleClick = async () => {
@@ -107,6 +117,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
           <span className="proto-badge" style={{ borderColor: protoColor, color: protoColor }}>
             {server.protocol}
           </span>
+          <span className="stack-badge">{stackLabel(server)}</span>
           <span className={`server-ping ${pClass}`}>
             {server.latency_ms != null ? `${server.latency_ms}ms` : "\u2014"}
           </span>
@@ -133,6 +144,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
       <span className="proto-badge" style={{ borderColor: protoColor, color: protoColor }}>
         {server.protocol}
       </span>
+      <span className="stack-badge">{stackLabel(server)}</span>
       <span className="server-name">{server.name}</span>
       <div className="ping-section">
         {server.latency_ms != null && (

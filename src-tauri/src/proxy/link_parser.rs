@@ -46,11 +46,22 @@ pub fn decode_subscription_content(content: &str) -> String {
 
 /// Decode base64 subscription content, then parse links
 pub fn parse_subscription_content(content: &str) -> Vec<Server> {
+    let trimmed = content.trim();
+
+    // Xray-JSON-array subscription format (happ-style): starts with "[{" and contains full xray configs
+    if trimmed.starts_with('[') {
+        if let Ok(servers) = parse_xray_json_array(trimmed) {
+            if !servers.is_empty() {
+                return servers;
+            }
+        }
+    }
+
     // Try base64 decode first
     let decoded = general_purpose::STANDARD
-        .decode(content.trim())
-        .or_else(|_| general_purpose::URL_SAFE.decode(content.trim()))
-        .or_else(|_| general_purpose::URL_SAFE_NO_PAD.decode(content.trim()));
+        .decode(trimmed)
+        .or_else(|_| general_purpose::URL_SAFE.decode(trimmed))
+        .or_else(|_| general_purpose::URL_SAFE_NO_PAD.decode(trimmed));
 
     match decoded {
         Ok(bytes) => {
@@ -61,6 +72,176 @@ pub fn parse_subscription_content(content: &str) -> Vec<Server> {
             }
         }
         Err(_) => parse_links(content),
+    }
+}
+
+/// Parse happ-style subscription: a JSON array where each item is a full xray
+/// config, and the server lives in outbounds[tag=="proxy"].
+fn parse_xray_json_array(text: &str) -> Result<Vec<Server>> {
+    let arr: Vec<serde_json::Value> = serde_json::from_str(text)?;
+    let mut out = Vec::new();
+    for item in arr {
+        if let Some(server) = parse_xray_config_item(&item) {
+            out.push(server);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_xray_config_item(item: &serde_json::Value) -> Option<Server> {
+    let name = item.get("remarks").and_then(|v| v.as_str()).unwrap_or("Xray Server").to_string();
+    let outbounds = item.get("outbounds")?.as_array()?;
+    let proxy = outbounds.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("proxy"))?;
+
+    let protocol_str = proxy.get("protocol")?.as_str()?;
+    let settings = proxy.get("settings");
+    let stream = proxy.get("streamSettings");
+
+    let (protocol, address, port, uuid, password, method, flow, alter_id, transport, ws, grpc, xhttp, httpupgrade) = match protocol_str {
+        "hysteria" | "hysteria2" => {
+            let s = settings?;
+            let addr = s.get("address")?.as_str()?.to_string();
+            let p = s.get("port")?.as_u64()? as u16;
+            let auth = stream
+                .and_then(|st| st.get("hysteriaSettings"))
+                .and_then(|h| h.get("auth"))
+                .and_then(|a| a.as_str())
+                .unwrap_or("")
+                .to_string();
+            (Protocol::Hysteria2, addr, p, None, Some(auth), None, None, None, Transport::Quic, None, None, None, None)
+        }
+        "vless" => {
+            let vnext = settings?.get("vnext")?.as_array()?.first()?;
+            let addr = vnext.get("address")?.as_str()?.to_string();
+            let p = vnext.get("port")?.as_u64()? as u16;
+            let user = vnext.get("users")?.as_array()?.first()?;
+            let id = user.get("id")?.as_str()?.to_string();
+            let fl = user.get("flow").and_then(|v| v.as_str()).map(String::from);
+            let (tr, ws_s, grpc_s, xhttp_s, hu_s) = parse_xray_transport(stream);
+            (Protocol::Vless, addr, p, Some(id), None, None, fl, None, tr, ws_s, grpc_s, xhttp_s, hu_s)
+        }
+        "vmess" => {
+            let vnext = settings?.get("vnext")?.as_array()?.first()?;
+            let addr = vnext.get("address")?.as_str()?.to_string();
+            let p = vnext.get("port")?.as_u64()? as u16;
+            let user = vnext.get("users")?.as_array()?.first()?;
+            let id = user.get("id")?.as_str()?.to_string();
+            let aid = user.get("alterId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let (tr, ws_s, grpc_s, xhttp_s, hu_s) = parse_xray_transport(stream);
+            (Protocol::Vmess, addr, p, Some(id), None, None, None, Some(aid), tr, ws_s, grpc_s, xhttp_s, hu_s)
+        }
+        "trojan" => {
+            let srv = settings?.get("servers")?.as_array()?.first()?;
+            let addr = srv.get("address")?.as_str()?.to_string();
+            let p = srv.get("port")?.as_u64()? as u16;
+            let pw = srv.get("password")?.as_str()?.to_string();
+            let (tr, ws_s, grpc_s, xhttp_s, hu_s) = parse_xray_transport(stream);
+            (Protocol::Trojan, addr, p, None, Some(pw), None, None, None, tr, ws_s, grpc_s, xhttp_s, hu_s)
+        }
+        "shadowsocks" => {
+            let srv = settings?.get("servers")?.as_array()?.first()?;
+            let addr = srv.get("address")?.as_str()?.to_string();
+            let p = srv.get("port")?.as_u64()? as u16;
+            let pw = srv.get("password")?.as_str()?.to_string();
+            let m = srv.get("method").and_then(|v| v.as_str()).unwrap_or("aes-256-gcm").to_string();
+            (Protocol::Shadowsocks, addr, p, None, Some(pw), Some(m), None, None, Transport::Tcp, None, None, None, None)
+        }
+        _ => return None,
+    };
+
+    Some(Server {
+        id: Uuid::new_v4().to_string(),
+        name,
+        address,
+        port,
+        protocol,
+        uuid,
+        password,
+        method,
+        flow,
+        alter_id,
+        transport,
+        ws,
+        grpc,
+        xhttp,
+        httpupgrade,
+        tls: build_tls_from_stream(stream),
+        subscription_id: None,
+        latency_ms: None,
+        favorite: false,
+    })
+}
+
+fn parse_xray_transport(stream: Option<&serde_json::Value>) -> (Transport, Option<WsSettings>, Option<GrpcSettings>, Option<XhttpSettings>, Option<HttpupgradeSettings>) {
+    let network = stream.and_then(|s| s.get("network")).and_then(|v| v.as_str()).unwrap_or("tcp");
+    match network {
+        "ws" => {
+            let ws = stream.and_then(|s| s.get("wsSettings"));
+            let path = ws.and_then(|w| w.get("path")).and_then(|v| v.as_str()).unwrap_or("/").to_string();
+            let host = ws
+                .and_then(|w| w.get("headers"))
+                .and_then(|h| h.get("Host"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            (Transport::Ws, Some(WsSettings { path, host }), None, None, None)
+        }
+        "grpc" => {
+            let name = stream
+                .and_then(|s| s.get("grpcSettings"))
+                .and_then(|g| g.get("serviceName"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            (Transport::Grpc, None, Some(GrpcSettings { service_name: name }), None, None)
+        }
+        "xhttp" => {
+            let xh = stream.and_then(|s| s.get("xhttpSettings"));
+            let path = xh.and_then(|x| x.get("path")).and_then(|v| v.as_str()).unwrap_or("/").to_string();
+            let host = xh.and_then(|x| x.get("host")).and_then(|v| v.as_str()).map(String::from);
+            let mode = xh.and_then(|x| x.get("mode")).and_then(|v| v.as_str()).map(String::from);
+            (Transport::Xhttp, None, None, Some(XhttpSettings { path, host, mode }), None)
+        }
+        "httpupgrade" => {
+            let hu = stream.and_then(|s| s.get("httpupgradeSettings"));
+            let path = hu.and_then(|h| h.get("path")).and_then(|v| v.as_str()).unwrap_or("/").to_string();
+            let host = hu.and_then(|h| h.get("host")).and_then(|v| v.as_str()).map(String::from);
+            (Transport::Httpupgrade, None, None, None, Some(HttpupgradeSettings { path, host }))
+        }
+        "h2" | "http" => (Transport::Http, None, None, None, None),
+        _ => (Transport::Tcp, None, None, None, None),
+    }
+}
+
+fn build_tls_from_stream(stream: Option<&serde_json::Value>) -> TlsSettings {
+    let security = stream.and_then(|s| s.get("security")).and_then(|v| v.as_str());
+    let tls = stream.and_then(|s| s.get("tlsSettings"));
+    let rs = stream.and_then(|s| s.get("realitySettings"));
+
+    let reality = if security == Some("reality") {
+        rs.map(|r| RealitySettings {
+            public_key: r.get("publicKey").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            short_id: r.get("shortId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        })
+    } else { None };
+
+    let server_name = tls.and_then(|t| t.get("serverName")).and_then(|v| v.as_str())
+        .or_else(|| rs.and_then(|r| r.get("serverName")).and_then(|v| v.as_str()))
+        .map(String::from);
+    let fingerprint = tls.and_then(|t| t.get("fingerprint")).and_then(|v| v.as_str())
+        .or_else(|| rs.and_then(|r| r.get("fingerprint")).and_then(|v| v.as_str()))
+        .map(String::from);
+
+    TlsSettings {
+        enabled: matches!(security, Some("tls") | Some("reality")),
+        server_name,
+        insecure: tls.and_then(|t| t.get("allowInsecure")).and_then(|v| v.as_bool()).unwrap_or(false),
+        alpn: tls
+            .and_then(|t| t.get("alpn"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_else(|| vec!["h3".to_string()]),
+        fingerprint,
+        reality,
     }
 }
 

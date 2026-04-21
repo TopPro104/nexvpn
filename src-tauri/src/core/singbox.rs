@@ -184,10 +184,23 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Val
     // Is server.address an IP literal or a hostname?
     let server_is_ip = server_address.parse::<std::net::IpAddr>().is_ok();
     let bypass_domain: Vec<String> = if !server_is_ip { vec![server_address.to_string()] } else { vec![] };
-    let bypass_ip: Vec<String> = if server_is_ip {
+    let mut bypass_ip: Vec<String> = Vec::new();
+    if server_is_ip {
         let is_v6 = server_address.parse::<std::net::Ipv6Addr>().is_ok();
-        vec![format!("{}/{}", server_address, if is_v6 { 128 } else { 32 })]
-    } else { vec![] };
+        bypass_ip.push(format!("{}/{}", server_address, if is_v6 { 128 } else { 32 }));
+    } else {
+        // Pre-resolve the hostname and add its IPs to bypass_ip. For QUIC/Hysteria2
+        // traffic sing-box can't always sniff SNI, so a domain-only rule misses the
+        // packets and they loop back through TUN → Xray → TUN forever.
+        use std::net::ToSocketAddrs;
+        if let Ok(iter) = (server_address, 443u16).to_socket_addrs() {
+            for addr in iter {
+                let ip = addr.ip();
+                let cidr = if ip.is_ipv6() { 128 } else { 32 };
+                bypass_ip.push(format!("{}/{}", ip, cidr));
+            }
+        }
+    }
 
     // macOS expects utun{N}; Windows/Linux use a free name.
     // v2rayN picks a random utun index to avoid conflicts with other VPN apps.

@@ -711,8 +711,8 @@ body {
 }
 
 .server-card.active {
-  background: var(--bg-tertiary);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .server-proto {
@@ -736,6 +736,18 @@ body {
   font-weight: 600;
   flex-shrink: 0;
   letter-spacing: 0.3px;
+}
+
+.stack-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .ping-section {
@@ -2118,6 +2130,11 @@ input[type="number"] {
 .style-minimal .core-radio {
   border-radius: 4px;
 }
+.style-minimal .server-card.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-primary));
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 
 /* ── Glassmorphism ────────────────────────────── */
 .style-glass .sidebar {
@@ -2221,6 +2238,13 @@ input[type="number"] {
 }
 .style-glass .nav-item.active {
   background: rgba(255, 255, 255, 0.06);
+}
+.style-glass .server-card.active {
+  background: color-mix(in srgb, var(--accent) 20%, rgba(255, 255, 255, 0.06));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent),
+              0 8px 32px rgba(124, 92, 255, 0.25),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 /* ── Neon Glow ────────────────────────────────── */

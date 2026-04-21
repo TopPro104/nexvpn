@@ -49,8 +49,15 @@ export function PerAppVpn() {
     return <div className="per-app-loading">{t("perApp.loading")}</div>;
   }
 
+  const vpnMode = state.settings.vpn_mode;
+
   return (
     <div className="per-app-vpn">
+      {vpnMode !== "tun" && (
+        <div className="per-app-warning">
+          {t("perApp.tunOnly")}
+        </div>
+      )}
       <div className="settings-section">
         <div className="settings-label">{t("perApp.mode")}</div>
         <div className="core-radio-group">

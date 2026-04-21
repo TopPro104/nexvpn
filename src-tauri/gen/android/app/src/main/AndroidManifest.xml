@@ -80,6 +80,17 @@
                 android:value="true" />
         </service>
 
+        <!-- Xposed module metadata (for LSPosed VPN hiding) -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="NexVPN Stealth: hides VPN from detection apps" />
+
         <!-- Home screen widget -->
         <receiver
             android:name=".VpnWidgetProvider"

@@ -8,6 +8,8 @@ export interface ServerInfo {
   address: string;
   port: number;
   protocol: string;
+  transport: string;
+  security: string; // "tls" | "reality" | "none"
   latency_ms: number | null;
   subscription_id: string | null;
   favorite: boolean;
@@ -58,6 +60,7 @@ export interface Settings {
   stealth_mode: boolean;
   per_app_mode: string; // "all" | "include" | "exclude"
   per_app_list: string[];
+  happ_ua: boolean;
 }
 
 export interface InstalledApp {
@@ -246,6 +249,9 @@ export const api = {
 
   // Persisted active server
   getActiveServerId: () => invoke<string | null>("get_active_server_id"),
+
+  setSelectedServer: (serverId: string | null) =>
+    invoke<void>("set_selected_server", { serverId }),
 
   // Per-app VPN
   getInstalledApps: () => invoke<InstalledApp[]>("get_installed_apps"),

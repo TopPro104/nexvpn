@@ -24,7 +24,7 @@ export function SettingsPage() {
   void state.langTick;
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [hwidCopied, setHwidCopied] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(true); // assume admin until checked
+  const [isAdmin, setIsAdmin] = useState(true);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -281,7 +281,7 @@ export function SettingsPage() {
         )}
       </div>
 
-      {deviceInfo?.platform === "android" && (
+      {deviceInfo?.platform?.toLowerCase() === "android" && (
         <div className="settings-section">
           <div className="settings-label">{t("settings.stealth")}</div>
           <label className="toggle">
@@ -293,6 +293,25 @@ export function SettingsPage() {
             <span className="toggle-slider" />
           </label>
           <div className="hwid-desc">{t("settings.stealthDesc")}</div>
+        </div>
+      )}
+
+      {deviceInfo?.platform?.toLowerCase() === "android" && (
+        <div className="settings-section">
+          <div className="settings-label">{t("settings.xposed")}</div>
+          <div className="xposed-card">
+            <div className="xposed-status">
+              <span className="xposed-dot" />
+              <span>{t("settings.xposedBuiltIn")}</span>
+            </div>
+            <div className="hwid-desc">{t("settings.xposedDesc")}</div>
+            <div className="xposed-steps">
+              <div className="xposed-step">1. {t("settings.xposedStep1")}</div>
+              <div className="xposed-step">2. {t("settings.xposedStep2")}</div>
+              <div className="xposed-step">3. {t("settings.xposedStep3")}</div>
+              <div className="xposed-step">4. {t("settings.xposedStep4")}</div>
+            </div>
+          </div>
         </div>
       )}
     </>
@@ -365,6 +384,19 @@ export function SettingsPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-label">{t("settings.happUa")}</div>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={state.settings.happ_ua}
+            onChange={(e) => update("happ_ua", e.target.checked)}
+          />
+          <span className="toggle-slider" />
+        </label>
+        <div className="hwid-desc">{t("settings.happUaDesc")}</div>
       </div>
 
       <div className="settings-section">

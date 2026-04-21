@@ -123,6 +123,8 @@ const translations = {
   "settings.importExport": { en: "Import / Export", ru: "Импорт / Экспорт" },
   "settings.export": { en: "Export Config", ru: "Экспорт конфига" },
   "settings.importBtn": { en: "Import Config", ru: "Импорт конфига" },
+  "settings.happUa": { en: "Happ-compatible User-Agent", ru: "User-Agent совместимый с Happ" },
+  "settings.happUaDesc": { en: "Prepends \"Happ/3.18.1\" to the subscription fetch User-Agent. Some providers only serve configs to known clients.", ru: "Добавляет «Happ/3.18.1» в User-Agent при запросе подписок. Некоторые провайдеры отдают конфиги только известным клиентам." },
   "settings.hwid": { en: "Send device info", ru: "Отправлять информацию об устройстве" },
   "settings.hwidDesc": { en: "Sends HWID and device info with subscription requests. Required by some panels.", ru: "Передаёт HWID и информацию об устройстве вместе с запросами подписок. Нужно для некоторых панелей." },
   "settings.hwidCopy": { en: "Copy", ru: "Копировать" },

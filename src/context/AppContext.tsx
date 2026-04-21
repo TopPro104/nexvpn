@@ -76,6 +76,7 @@ const defaultSettings: Settings = {
   stealth_mode: false,
   per_app_mode: "all",
   per_app_list: [],
+  happ_ua: true,
 };
 
 const initialState: AppState = {

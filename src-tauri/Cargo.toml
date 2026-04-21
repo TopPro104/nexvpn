@@ -1,6 +1,6 @@
 [package]
 name = "nexvpn"
-version = "1.4.3"
+version = "1.4.4"
 description = "Open-source VPN client with multi-protocol support"
 authors = ["HorusVPN"]
 edition = "2021"
