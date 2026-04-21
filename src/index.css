@@ -750,6 +750,30 @@ body {
   white-space: nowrap;
 }
 
+/* Mobile (≤600px): two-row layout — name on top, badges + ping below.
+ * The ping bar is dropped; only the numeric ms stays to save horizontal room. */
+@media (max-width: 600px) {
+  .server-card {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    column-gap: 8px;
+    padding: 10px 12px;
+  }
+  .server-card .server-name {
+    flex-basis: 100%;
+    order: -1;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .server-card .ping-section .ping-bar-container { display: none; }
+  .server-card .ping-section { min-width: auto; }
+  .server-card .proto-badge,
+  .server-card .stack-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+}
+
 .ping-section {
   display: flex;
   align-items: center;
