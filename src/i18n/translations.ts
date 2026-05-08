@@ -54,6 +54,8 @@ const translations = {
   "subs.updated": { en: "Updated", ru: "Обновлено" },
   "subs.never": { en: "Never", ru: "Никогда" },
   "subs.update": { en: "Update", ru: "Обновить" },
+  "subs.updateAll": { en: "Update all", ru: "Обновить все" },
+  "toast.subsUpdatedAll": { en: "Updated subscriptions", ru: "Подписки обновлены" },
   "subs.delete": { en: "Delete", ru: "Удалить" },
   "subs.addTitle": { en: "Add Subscription", ru: "Добавить подписку" },
   "subs.urlLabel": { en: "Subscription URL", ru: "URL подписки" },

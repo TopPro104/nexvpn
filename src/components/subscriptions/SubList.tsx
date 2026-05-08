@@ -120,6 +120,36 @@ export function SubList() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
+
+  const handleUpdateAll = async () => {
+    if (updatingAll || state.subscriptions.length === 0) return;
+    setUpdatingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        state.subscriptions.map((s) => api.updateSubscription(s.id))
+      );
+      const [servers, subs] = await Promise.all([
+        api.getServers(),
+        api.getSubscriptions(),
+      ]);
+      dispatch({ type: "SET_SERVERS", servers });
+      dispatch({ type: "SET_SUBSCRIPTIONS", subs });
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      const total = results.length;
+      const firstErr = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      if (ok === total) {
+        toast(`${t("toast.subsUpdatedAll")}: ${ok}/${total}`, "success");
+      } else if (ok === 0) {
+        toast(firstErr ? String(firstErr.reason) : "Failed", "error");
+      } else {
+        toast(`${t("toast.subsUpdatedAll")}: ${ok}/${total}`, "info");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "error");
+    }
+    setUpdatingAll(false);
+  };
 
   const handleUpdate = async (id: string) => {
     setUpdatingId(id);
@@ -174,6 +204,15 @@ export function SubList() {
           >
             {t("subs.reliableSource")}
           </Button>
+          {state.subscriptions.length > 1 && (
+            <Button
+              variant="secondary"
+              onClick={handleUpdateAll}
+              disabled={updatingAll || updatingId !== null}
+            >
+              {updatingAll ? <Spinner size={14} /> : t("subs.updateAll")}
+            </Button>
+          )}
           <Button onClick={() => setShowAdd(true)}>{t("subs.add")}</Button>
         </div>
       </div>

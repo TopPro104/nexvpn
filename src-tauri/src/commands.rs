@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::core::manager::CoreManager;
@@ -466,9 +466,10 @@ pub async fn ping_server(ctx: State<'_, AppContext>, server_id: String) -> Resul
 
     let addr = server.address.clone();
     let port = server.port;
+    let protocol = server.protocol.clone();
     drop(state);
 
-    let result = ping::ping_average(&addr, port).await;
+    let result = ping::ping_average(&protocol, &addr, port).await;
 
     let mut state = ctx.state.lock().await;
     if let Some(s) = state.servers.iter_mut().find(|s| s.id == server_id) {
@@ -479,18 +480,38 @@ pub async fn ping_server(ctx: State<'_, AppContext>, server_id: String) -> Resul
     Ok(result)
 }
 
-/// Ping all servers
+/// Ping all servers. Emits a `ping-result` event per server as soon as its
+/// individual probe completes — frontend updates the UI incrementally instead
+/// of waiting for the slowest server.
 #[tauri::command]
-pub async fn ping_all_servers(ctx: State<'_, AppContext>) -> Result<Vec<(String, Option<u32>)>, String> {
+pub async fn ping_all_servers(
+    app: tauri::AppHandle,
+    ctx: State<'_, AppContext>,
+) -> Result<Vec<(String, Option<u32>)>, String> {
     let state = ctx.state.lock().await;
-    let targets: Vec<(String, String, u16)> = state
+    let targets: Vec<(String, crate::proxy::models::Protocol, String, u16)> = state
         .servers
         .iter()
-        .map(|s| (s.id.clone(), s.address.clone(), s.port))
+        .map(|s| (s.id.clone(), s.protocol.clone(), s.address.clone(), s.port))
         .collect();
     drop(state);
 
-    let results = ping::ping_all(&targets).await;
+    let mut handles = Vec::with_capacity(targets.len());
+    for (id, protocol, address, port) in targets {
+        let app = app.clone();
+        handles.push(tokio::spawn(async move {
+            let latency = ping::ping_average(&protocol, &address, port).await;
+            let _ = app.emit("ping-result", (id.clone(), latency));
+            (id, latency)
+        }));
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for h in handles {
+        if let Ok(r) = h.await {
+            results.push(r);
+        }
+    }
 
     let mut state = ctx.state.lock().await;
     for (id, latency) in &results {
@@ -537,6 +558,16 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
 
     let mut state = ctx.state.lock().await;
 
+    // Snapshot the currently-active server (if it belongs to this subscription)
+    // before we wipe the server list, so we can remap active_server_id to the
+    // new server entry afterwards (servers get fresh UUIDs on each fetch).
+    let active_match: Option<(String, String, u16, crate::proxy::models::Protocol)> = state
+        .active_server_id
+        .as_ref()
+        .and_then(|id| state.servers.iter().find(|s| &s.id == id))
+        .filter(|s| s.subscription_id.as_deref() == Some(&subscription_id))
+        .map(|s| (s.name.clone(), s.address.clone(), s.port, s.protocol.clone()));
+
     // Remove old servers belonging to this subscription
     state.servers.retain(|s| s.subscription_id.as_deref() != Some(&subscription_id));
 
@@ -544,6 +575,18 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
     let mut tagged_servers = new_servers;
     for server in &mut tagged_servers {
         server.subscription_id = Some(subscription_id.clone());
+    }
+
+    // Remap active_server_id to the matching new server, if any
+    if let Some((name, addr, port, proto)) = active_match {
+        let new_id = tagged_servers
+            .iter()
+            .find(|s| s.address == addr && s.port == port && s.protocol == proto && s.name == name)
+            .or_else(|| tagged_servers.iter().find(|s| s.address == addr && s.port == port && s.protocol == proto))
+            .map(|s| s.id.clone());
+        if let Some(id) = new_id {
+            state.active_server_id = Some(id);
+        }
     }
 
     let infos: Vec<ServerInfo> = tagged_servers.iter().map(ServerInfo::from).collect();
@@ -594,10 +637,10 @@ pub async fn auto_select_server(ctx: State<'_, AppContext>) -> Result<ServerInfo
         return Err("No servers available".to_string());
     }
 
-    let targets: Vec<(String, String, u16)> = state
+    let targets: Vec<(String, crate::proxy::models::Protocol, String, u16)> = state
         .servers
         .iter()
-        .map(|s| (s.id.clone(), s.address.clone(), s.port))
+        .map(|s| (s.id.clone(), s.protocol.clone(), s.address.clone(), s.port))
         .collect();
     drop(state);
 
