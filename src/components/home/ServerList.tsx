@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useApp, SortKey, ViewMode } from "../../context/AppContext";
 import { api, ServerInfo } from "../../api/tauri";
 import { ServerCard } from "./ServerCard";
@@ -124,15 +125,19 @@ export function ServerList() {
 
   const handlePingAll = async () => {
     setPinging(true);
+    const unlisten = await listen<[string, number | null]>("ping-result", (e) => {
+      dispatch({ type: "UPDATE_LATENCIES", results: [e.payload] });
+    });
     try {
       const results = await api.pingAllServers();
-      dispatch({ type: "UPDATE_LATENCIES", results });
       const reachable = results.filter(([, ms]) => ms !== null).length;
       toast(`${t("toast.pingDone")}: ${reachable}/${results.length} ${t("toast.reachable")}`, "success");
     } catch (e) {
       toast(`${e}`, "error");
+    } finally {
+      unlisten();
+      setPinging(false);
     }
-    setPinging(false);
   };
 
   const handleAutoSelect = async () => {
