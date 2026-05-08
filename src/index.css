@@ -3174,14 +3174,13 @@ input[type="number"] {
 
   .sub-header-actions {
     flex-wrap: wrap;
+    gap: 8px;
   }
 
   .sub-header-actions .btn {
-    flex: 1;
-    min-width: 0;
-    font-size: 12px;
-    text-align: center;
-    justify-content: center;
+    flex: 0 0 auto;
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   .sub-card {
