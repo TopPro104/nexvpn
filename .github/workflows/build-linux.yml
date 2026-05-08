@@ -9,6 +9,8 @@ on:
 jobs:
   build-appimage:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -51,20 +53,28 @@ jobs:
       - name: Build Tauri AppImage + deb
         run: npx tauri build
 
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          name: nexvpn-linux-appimage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          files: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          fail_on_unmatched_files: false
 
-      - name: Upload deb
+      - name: Upload artifacts (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: nexvpn-linux-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          name: nexvpn-linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
 
   build-flatpak:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     container:
       image: bilelmoussaoui/flatpak-github-actions:gnome-47
       options: --privileged
@@ -79,7 +89,15 @@ jobs:
           bundle: nexvpn.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
 
-      - name: Upload Flatpak
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nexvpn.flatpak
+          fail_on_unmatched_files: false
+
+      - name: Upload artifact (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: nexvpn-linux-flatpak

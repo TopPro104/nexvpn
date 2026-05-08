@@ -28,18 +28,17 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-# Main binary + sidecars + wintun
-$files = @(
-    "nexvpn.exe",
-    "sing-box.exe",
-    "xray.exe",
-    "tun2socks.exe",
-    "wintun.dll"
-)
+# Main binary + sidecars (sing-box, xray) + wintun (Windows TUN driver)
+$files = @("nexvpn.exe", "sing-box.exe", "xray.exe", "wintun.dll")
+$fallbackDir = "src-tauri/binaries"
 foreach ($f in $files) {
     $src = Join-Path $releaseDir $f
     if (-not (Test-Path $src)) {
-        Write-Host "Missing: $src" -ForegroundColor Yellow
+        $alt = Join-Path $fallbackDir $f
+        if (Test-Path $alt) { $src = $alt }
+    }
+    if (-not (Test-Path $src)) {
+        Write-Host "Missing: $f" -ForegroundColor Yellow
         continue
     }
     Copy-Item $src -Destination $stage
