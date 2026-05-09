@@ -358,6 +358,9 @@ body {
 .status-server {
   font-size: 14px;
   color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .status-server.selected {

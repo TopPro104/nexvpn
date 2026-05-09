@@ -1,7 +1,7 @@
 import { useApp } from "../../context/AppContext";
 import { api } from "../../api/tauri";
 import { Flag } from "../ui/Flag";
-import { extractCountryCode } from "../../utils/countryUtils";
+import { extractCountryCode, stripFlagEmoji } from "../../utils/countryUtils";
 import { ZapIcon } from "../ui/Icons";
 import { t } from "../../i18n/translations";
 
@@ -31,7 +31,7 @@ export function QuickConnect() {
       try {
         const status = await api.connect(serverId);
         dispatch({ type: "SET_STATUS", status });
-        toast(`${t("toast.connectedTo")} ${status.server_name}`, "success");
+        toast(`${t("toast.connectedTo")} ${stripFlagEmoji(status.server_name ?? "")}`, "success");
       } catch (e) {
         toast(`${e}`, "error");
       }
@@ -51,7 +51,7 @@ export function QuickConnect() {
                 onClick={() => handleQuickSelect(server!.id)}
               >
                 <Flag code={extractCountryCode(server!.name)} size={16} />
-                <span className="quick-item-name">{server!.name}</span>
+                <span className="quick-item-name">{stripFlagEmoji(server!.name)}</span>
                 {server!.latency_ms != null && (
                   <span className="quick-item-ping">{server!.latency_ms}ms</span>
                 )}
@@ -66,7 +66,7 @@ export function QuickConnect() {
           onClick={() => handleQuickSelect(recommended.id)}
         >
           <ZapIcon size={14} />
-          <span>{t("quick.fastest")}: {recommended.name} ({recommended.latency_ms}ms)</span>
+          <span>{t("quick.fastest")}: {stripFlagEmoji(recommended.name)} ({recommended.latency_ms}ms)</span>
         </button>
       )}
     </div>

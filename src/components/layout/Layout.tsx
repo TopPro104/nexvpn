@@ -2,6 +2,8 @@ import React from "react";
 import { Sidebar } from "./Sidebar";
 import { useApp, SettingsTab, StatsTab, LogsFilter, RoutingTab } from "../../context/AppContext";
 import { t } from "../../i18n/translations";
+import { extractCountryCode, stripFlagEmoji } from "../../utils/countryUtils";
+import { Flag } from "../ui/Flag";
 
 function SubTabs() {
   const { state, dispatch } = useApp();
@@ -141,9 +143,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
         <div className={`conn-badge ${state.connected ? "on" : "off"}`}>
           <span className="conn-badge-dot" />
+          {state.connected && state.serverName && (
+            <Flag code={extractCountryCode(state.serverName)} size={14} />
+          )}
           <span className="conn-badge-text">
             {state.connected
-              ? (state.serverName || "Connected")
+              ? (stripFlagEmoji(state.serverName ?? "") || "Connected")
               : "Disconnected"}
           </span>
         </div>

@@ -85,6 +85,13 @@ const KNOWN_CODES = new Set([
   "ws","xk","ye","za","zm","zw",
 ]);
 
+/// Remove regional-indicator emoji pairs (🇫🇮 etc.) from a string.
+/// Windows fonts render these as bare letters, so we strip them when the
+/// flag is already shown separately via the <Flag> component.
+export function stripFlagEmoji(name: string): string {
+  return name.replace(/[\u{1F1E6}-\u{1F1FF}]{2}/gu, "").replace(/\s+/g, " ").trim();
+}
+
 export function extractCountryCode(name: string): string | null {
   // 1. Flag emoji regional indicators
   for (let i = 0; i < name.length; i++) {

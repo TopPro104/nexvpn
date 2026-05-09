@@ -4,6 +4,7 @@ import { useApp } from "../../context/AppContext";
 import { Sparkline } from "../ui/Sparkline";
 import { Button } from "../ui/Button";
 import { t } from "../../i18n/translations";
+import { stripFlagEmoji } from "../../utils/countryUtils";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -201,7 +202,7 @@ export function StatsPage() {
             {topServers.map((s, i) => (
               <div key={i} className="top-server-row">
                 <span className="top-server-rank">#{i + 1}</span>
-                <span className="top-server-name">{s.server_name}</span>
+                <span className="top-server-name">{stripFlagEmoji(s.server_name)}</span>
                 <span className="top-server-proto">{s.protocol}</span>
                 <div className="top-server-bar-bg">
                   <div
@@ -236,7 +237,7 @@ export function StatsPage() {
                 <div key={i} className="history-row">
                   <span className="history-server">
                     <span className="history-proto">{r.protocol}</span>
-                    {r.server_name}
+                    {stripFlagEmoji(r.server_name)}
                   </span>
                   <span>{dur > 0 ? formatDuration(dur) : "--"}</span>
                   <span>

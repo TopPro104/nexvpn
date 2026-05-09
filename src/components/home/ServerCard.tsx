@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp } from "../../context/AppContext";
 import { ServerInfo, api } from "../../api/tauri";
 import { Flag } from "../ui/Flag";
-import { extractCountryCode } from "../../utils/countryUtils";
+import { extractCountryCode, stripFlagEmoji } from "../../utils/countryUtils";
 import { StarIcon, StarFilledIcon } from "../ui/Icons";
 import { t } from "../../i18n/translations";
 import { showConfirm } from "../../utils/confirm";
@@ -51,6 +51,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
   const { state, dispatch, toast } = useApp();
   const isSelected = state.selectedServerId === server.id;
   const country = extractCountryCode(server.name);
+  const displayName = stripFlagEmoji(server.name);
   const [favLoading, setFavLoading] = useState(false);
   const protoColor = getProtoColor(server.protocol);
   const pClass = pingClass(server.latency_ms);
@@ -67,7 +68,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
       try {
         const status = await api.connect(server.id);
         dispatch({ type: "SET_STATUS", status });
-        toast(`${t("toast.connectedTo")} ${server.name}`, "success");
+        toast(`${t("toast.connectedTo")} ${displayName}`, "success");
       } catch (err) {
         toast(err instanceof Error ? err.message : String(err), "error");
       }
@@ -76,7 +77,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!await showConfirm(`${t("servers.confirmDelete")} "${server.name}"?`)) return;
+    if (!await showConfirm(`${t("servers.confirmDelete")} "${displayName}"?`)) return;
     try {
       await api.removeServer(server.id);
       dispatch({ type: "REMOVE_SERVER", id: server.id });
@@ -112,7 +113,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
             {server.favorite ? <StarFilledIcon size={14} color="var(--warning)" /> : <StarIcon size={14} />}
           </span>
         </div>
-        <div className="grid-card-name">{server.name}</div>
+        <div className="grid-card-name">{displayName}</div>
         <div className="grid-card-meta">
           <span className="proto-badge" style={{ borderColor: protoColor, color: protoColor }}>
             {server.protocol}
@@ -145,7 +146,7 @@ export function ServerCard({ server, compact }: { server: ServerInfo; compact?: 
         {server.protocol}
       </span>
       <span className="stack-badge">{stackLabel(server)}</span>
-      <span className="server-name">{server.name}</span>
+      <span className="server-name">{displayName}</span>
       <div className="ping-section">
         {server.latency_ms != null && (
           <div className="ping-bar-container">

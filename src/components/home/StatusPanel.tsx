@@ -4,6 +4,8 @@ import { api } from "../../api/tauri";
 import { Spinner } from "../ui/Spinner";
 import { t } from "../../i18n/translations";
 import { PowerIcon } from "../ui/Icons";
+import { extractCountryCode, stripFlagEmoji } from "../../utils/countryUtils";
+import { Flag } from "../ui/Flag";
 
 export function StatusPanel() {
   const { state, dispatch, toast } = useApp();
@@ -47,7 +49,7 @@ export function StatusPanel() {
         }
         const status = await api.connect(state.selectedServerId);
         dispatch({ type: "SET_STATUS", status });
-        toast(`${t("toast.connectedTo")} ${status.server_name}`, "success");
+        toast(`${t("toast.connectedTo")} ${stripFlagEmoji(status.server_name ?? "")}`, "success");
       }
     } catch (e) {
       toast(`${e}`, "error");
@@ -81,11 +83,15 @@ export function StatusPanel() {
           {state.connected ? t("status.connected") : t("status.disconnected")}
         </div>
         {state.connected && state.serverName && (
-          <div className="status-server">{state.serverName}</div>
+          <div className="status-server">
+            <Flag code={extractCountryCode(state.serverName)} size={16} />
+            {stripFlagEmoji(state.serverName)}
+          </div>
         )}
         {!state.connected && selectedServer && (
           <div className="status-server selected">
-            {selectedServer.name} ({selectedServer.protocol})
+            <Flag code={extractCountryCode(selectedServer.name)} size={16} />
+            {stripFlagEmoji(selectedServer.name)} ({selectedServer.protocol})
           </div>
         )}
         {state.connected ? (
