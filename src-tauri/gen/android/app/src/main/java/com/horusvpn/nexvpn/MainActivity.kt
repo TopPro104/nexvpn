@@ -17,6 +17,8 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.ByteArrayOutputStream
 import java.io.File
 import org.json.JSONArray
@@ -59,6 +61,23 @@ class MainActivity : TauriActivity() {
 
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Edge-to-edge draws the WebView behind the system bars. On Android,
+        // WebView's env(safe-area-inset-*) only reflects display cutouts, NOT the
+        // navigation bar — so the bottom tab bar ends up under the nav buttons
+        // (issue #3). Apply the real system-bar + cutout insets as padding on the
+        // content view so nothing is obscured, on every device/gesture mode.
+        if (!launchedFromTile) {
+            val content = findViewById<android.view.View>(android.R.id.content)
+            ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+                val bars = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or
+                        WindowInsetsCompat.Type.displayCutout()
+                )
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+        }
 
         // If from tile, minimize immediately
         if (launchedFromTile) {
