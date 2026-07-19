@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 /*
  * Fork + exec a child process WITHOUT closing inherited file descriptors.
@@ -14,7 +15,7 @@
 JNIEXPORT jint JNICALL
 Java_com_horusvpn_nexvpn_NativeHelper_startProcess(
     JNIEnv *env, jclass clazz,
-    jstring jpath, jobjectArray jargs) {
+    jstring jpath, jobjectArray jargs, jint unCloexecFd) {
 
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     if (!path) return -1;
@@ -36,7 +37,17 @@ Java_com_horusvpn_nexvpn_NativeHelper_startProcess(
 
     pid_t pid = fork();
     if (pid == 0) {
-        /* Child — all fds are inherited, just exec */
+        /* Child — all fds are inherited, just exec.
+         * The TUN fd carries FD_CLOEXEC (set by VpnService), so it would be
+         * closed on execv and never reach tun2socks. Clear it here in native
+         * code — Java's android.system.Os.fcntlInt is a hidden non-SDK method
+         * that throws NoSuchMethodError on Android 10, crashing the service. */
+        if (unCloexecFd >= 0) {
+            int flags = fcntl(unCloexecFd, F_GETFD);
+            if (flags != -1) {
+                fcntl(unCloexecFd, F_SETFD, flags & ~FD_CLOEXEC);
+            }
+        }
         execv(path, argv);
         /* execv only returns on error */
         _exit(127);

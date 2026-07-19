@@ -12,10 +12,12 @@ object NativeHelper {
 
     /**
      * Fork and exec a process. All open file descriptors are inherited.
+     * @param unCloexecFd fd to clear FD_CLOEXEC on in the child before exec
+     *   (so the TUN fd survives execv). Pass -1 to skip.
      * @return child PID, or -1 on error
      */
     @JvmStatic
-    external fun startProcess(path: String, args: Array<String>): Int
+    external fun startProcess(path: String, args: Array<String>, unCloexecFd: Int): Int
 
     /** Send SIGTERM to process */
     @JvmStatic

@@ -143,17 +143,11 @@ class NexVpnService : VpnService() {
             val fd = vpnInterface!!.fd
             Log.i(TAG, "VPN interface established, fd=$fd")
 
-            // Remove close-on-exec so child process inherits the fd
-            try {
-                android.system.Os.fcntlInt(
-                    vpnInterface!!.fileDescriptor,
-                    android.system.OsConstants.F_SETFD,
-                    0
-                )
-                Log.i(TAG, "Cleared CLOEXEC on fd $fd")
-            } catch (e: Exception) {
-                Log.w(TAG, "fcntlInt CLOEXEC clear failed: $e")
-            }
+            // CLOEXEC on the TUN fd is cleared natively inside NativeHelper
+            // (in the forked child, before execv) — see native_helper.c.
+            // Doing it here via android.system.Os.fcntlInt crashes on Android 10:
+            // it's a hidden non-SDK method and throws NoSuchMethodError (an Error,
+            // not an Exception, so it isn't caught) right on Connect.
 
             // Find tun2socks binary
             val nativeLibDir = applicationInfo.nativeLibraryDir
@@ -193,7 +187,8 @@ class NexVpnService : VpnService() {
             // Android's ProcessBuilder closes all fds > 2, which would kill the TUN fd.
             tun2socksPid = NativeHelper.startProcess(
                 tun2socksPath,
-                arrayOf("-device", "fd://$fd", "-proxy", proxyUrl)
+                arrayOf("-device", "fd://$fd", "-proxy", proxyUrl),
+                fd
             )
 
             if (tun2socksPid <= 0) {
@@ -245,7 +240,8 @@ class NexVpnService : VpnService() {
                             Log.i(TAG, "Restarting tun2socks (attempt $restartCount/$MAX_RESTART_ATTEMPTS)")
                             tun2socksPid = NativeHelper.startProcess(
                                 lastTun2socksPath,
-                                arrayOf("-device", "fd://$fd", "-proxy", url)
+                                arrayOf("-device", "fd://$fd", "-proxy", url),
+                                fd
                             )
 
                             if (tun2socksPid > 0) {
