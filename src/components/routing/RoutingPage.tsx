@@ -5,6 +5,7 @@ import { t, getLang } from "../../i18n/translations";
 import { PerAppVpn } from "../settings/PerAppVpn";
 import { InfoIcon } from "../ui/Icons";
 import { RoutingProfilesSection, useRoutingProfiles } from "./RoutingProfiles";
+import { GeoPreviewModal, GeoPreviewTarget, isGeoEntry } from "./RoutingProfileEditor";
 
 export interface Preset {
   id: string;
@@ -66,6 +67,8 @@ export function RoutingPage() {
   const [presets, setPresets] = useState<Preset[]>(FALLBACK_PRESETS);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const routingProfiles = useRoutingProfiles();
+  // Custom rules use the default geo files (profile id null)
+  const [geoPreview, setGeoPreview] = useState<GeoPreviewTarget | null>(null);
   const activeProfile = routingProfiles.activeProfile;
   // With an active profile, its GlobalProxy decides where unmatched traffic goes
   const effectiveRoute = activeProfile
@@ -311,7 +314,18 @@ export function RoutingPage() {
                 >
                   {rule.action}
                 </span>
-                <span className="routing-rule-domain">{rule.domain}</span>
+                {isGeoEntry(rule.domain) ? (
+                  <button
+                    type="button"
+                    className="routing-rule-domain routing-chip-link"
+                    onClick={() => setGeoPreview({ profileId: null, entry: rule.domain })}
+                    title={t("routing.geoPreviewHint")}
+                  >
+                    {rule.domain}
+                  </button>
+                ) : (
+                  <span className="routing-rule-domain">{rule.domain}</span>
+                )}
                 <label className="toggle routing-rule-toggle">
                   <input
                     type="checkbox"
@@ -332,6 +346,7 @@ export function RoutingPage() {
         )}
       </div>
 
+      <GeoPreviewModal target={geoPreview} onClose={() => setGeoPreview(null)} />
     </div>
   );
 }

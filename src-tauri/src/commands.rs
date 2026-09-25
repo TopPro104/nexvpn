@@ -1087,22 +1087,32 @@ fn apply_routing_directive(state: &mut AppState, directive: HappDirective, subsc
     };
     profile.subscription_id = subscription_id.map(String::from);
 
+    let incoming = routing::to_happ_json(&profile);
+
     let existing = state.routing_profiles.iter_mut().find(|p| match subscription_id {
         Some(sid) => p.subscription_id.as_deref() == Some(sid),
         None => p.subscription_id.is_none() && p.name == profile.name,
     });
     let (id, is_new, changed) = match existing {
         Some(p) => {
-            profile.id = p.id.clone();
-            profile.geo_updated_at = p.geo_updated_at;
-            profile.geo_last_updated = p.geo_last_updated.clone();
-            profile.geo_error = p.geo_error.clone();
-            let changed = *p != profile;
-            *p = profile;
-            (p.id.clone(), false, changed)
+            // Same version as last time: keep the user's edits. Profiles saved before edit
+            // tracking have no snapshot; compare their content instead.
+            let same = match &p.original {
+                Some(original) => *original == incoming,
+                None => routing::to_happ_json(p) == incoming,
+            };
+            if same {
+                p.original = Some(incoming);
+            } else {
+                let mut replaced = routing::with_meta_from(profile, p);
+                replaced.original = Some(incoming);
+                *p = replaced;
+            }
+            (p.id.clone(), false, !same)
         }
         None => {
             profile.id = uuid::Uuid::new_v4().to_string();
+            profile.original = Some(incoming);
             let id = profile.id.clone();
             state.routing_profiles.push(profile);
             (id, true, true)
@@ -1143,13 +1153,198 @@ pub struct RoutingProfilesResponse {
     pub active_id: Option<String>,
 }
 
+fn profile_for_ui(p: &RoutingProfile) -> RoutingProfile {
+    let mut p = p.clone();
+    p.edited = routing::is_edited(&p);
+    p
+}
+
 #[tauri::command]
 pub async fn get_routing_profiles(ctx: State<'_, AppContext>) -> Result<RoutingProfilesResponse, String> {
     let state = ctx.state.lock().await;
     Ok(RoutingProfilesResponse {
-        profiles: state.routing_profiles.clone(),
+        profiles: state.routing_profiles.iter().map(profile_for_ui).collect(),
         active_id: active_profile(&state).map(|p| p.id.clone()),
     })
+}
+
+/// Store new content for an existing profile, fetch geo files if the new content needs
+/// them, and apply it if the profile is active. Shared by save and reset.
+async fn store_profile_content(ctx: &AppContext, id: &str, content: RoutingProfile) -> Result<RoutingProfile, String> {
+    let profile = {
+        let mut state = ctx.state.lock().await;
+        if state.routing_profiles.iter().any(|p| p.id != id && p.subscription_id.is_none() && content.subscription_id.is_none() && p.name == content.name) {
+            return Err(format!("A profile named \"{}\" already exists", content.name));
+        }
+        let stored = state.routing_profiles.iter_mut().find(|p| p.id == id).ok_or("Routing profile not found")?;
+        let updated = routing::with_meta_from(content, stored);
+        if routing::to_happ_json(&updated) == routing::to_happ_json(stored) {
+            return Ok(profile_for_ui(stored));
+        }
+        *stored = updated.clone();
+        save_state(&state);
+        updated
+    };
+
+    let result = if geo_needs_refresh(&profile, &ctx.core.geo_root()) {
+        let dir = routing::geo_dir(&ctx.core.geo_root(), Some(&profile));
+        Some(download_geo(&dir, &profile.geosite_url, &profile.geoip_url).await)
+    } else {
+        None
+    };
+
+    let mut state = ctx.state.lock().await;
+    if let Some(r) = &result {
+        record_geo_result(&mut state, &profile, r);
+        save_state(&state);
+    }
+    if state.active_routing_profile.as_deref() == Some(id) {
+        reconnect_if_running(ctx, &state).await;
+    }
+    // A failed download is reported through the profile's geo_error; the content is saved
+    state.routing_profiles.iter().find(|p| p.id == id).map(profile_for_ui).ok_or_else(|| "Routing profile not found".to_string())
+}
+
+/// Save a profile edited in the UI.
+#[tauri::command]
+pub async fn save_routing_profile(ctx: State<'_, AppContext>, profile: RoutingProfile) -> Result<RoutingProfile, String> {
+    let id = profile.id.clone();
+    let subscription_id = {
+        let state = ctx.state.lock().await;
+        state.routing_profiles.iter().find(|p| p.id == id).ok_or("Routing profile not found")?.subscription_id.clone()
+    };
+    let mut content = routing::validate_profile(profile).map_err(|e| e.to_string())?;
+    content.subscription_id = subscription_id;
+    store_profile_content(&ctx, &id, content).await
+}
+
+/// Undo edits: restore the version the profile was imported or created with.
+#[tauri::command]
+pub async fn reset_routing_profile(ctx: State<'_, AppContext>, id: String) -> Result<RoutingProfile, String> {
+    let (original, subscription_id) = {
+        let state = ctx.state.lock().await;
+        let p = state.routing_profiles.iter().find(|p| p.id == id).ok_or("Routing profile not found")?;
+        (p.original.clone().ok_or("This profile has no original version")?, p.subscription_id.clone())
+    };
+    let mut content = routing::profile_from_happ_json(&original).map_err(|e| e.to_string())?;
+    content.subscription_id = subscription_id;
+    store_profile_content(&ctx, &id, content).await
+}
+
+/// New profile from default values; not activated. Its geo files download in the
+/// background so the editor can offer categories.
+#[tauri::command]
+pub async fn create_routing_profile(ctx: State<'_, AppContext>, name: String) -> Result<RoutingProfile, String> {
+    let mut state = ctx.state.lock().await;
+    let base = if name.trim().is_empty() { "Profile".to_string() } else { name.trim().to_string() };
+    let taken = |n: &str| state.routing_profiles.iter().any(|p| p.subscription_id.is_none() && p.name == n);
+    let mut unique = base.clone();
+    let mut n = 2;
+    while taken(&unique) {
+        unique = format!("{} {}", base, n);
+        n += 1;
+    }
+    let mut profile = routing::default_profile(&unique);
+    profile.id = uuid::Uuid::new_v4().to_string();
+    profile.original = Some(routing::to_happ_json(&profile));
+    state.routing_profiles.push(profile.clone());
+    save_state(&state);
+    spawn_geo_refresh(&ctx, &state, &profile.id);
+    Ok(profile_for_ui(&profile))
+}
+
+/// `happ://routing/add/...` link with the profile's current content.
+#[tauri::command]
+pub async fn export_routing_profile(ctx: State<'_, AppContext>, id: String) -> Result<String, String> {
+    let state = ctx.state.lock().await;
+    let p = state.routing_profiles.iter().find(|p| p.id == id).ok_or("Routing profile not found")?;
+    Ok(routing::export_link(p))
+}
+
+#[derive(Serialize)]
+pub struct GeoCodes {
+    pub geosite: Vec<String>,
+    pub geoip: Vec<String>,
+}
+
+/// Geo dir of a profile, or of the default files used by custom rules (id = None)
+async fn geo_dir_for(ctx: &AppContext, id: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let state = ctx.state.lock().await;
+    let profile = match id {
+        Some(id) => Some(state.routing_profiles.iter().find(|p| p.id == id).ok_or("Routing profile not found")?),
+        None => None,
+    };
+    Ok(routing::geo_dir(&ctx.core.geo_root(), profile))
+}
+
+/// Category codes available in the downloaded geo files (for autocomplete).
+#[tauri::command]
+pub async fn get_geo_codes(ctx: State<'_, AppContext>, id: Option<String>) -> Result<GeoCodes, String> {
+    let dir = geo_dir_for(&ctx, id.as_deref()).await?;
+    tokio::task::spawn_blocking(move || {
+        let codes = |file: &str| -> Vec<String> {
+            let path = dir.join(file);
+            let mut v: Vec<String> = if path.exists() { geo::list_codes(&path).map(|s| s.into_iter().collect()).unwrap_or_default() } else { Vec::new() };
+            v.sort();
+            v
+        };
+        GeoCodes { geosite: codes("geosite.dat"), geoip: codes("geoip.dat") }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct GeoCategory {
+    pub kind: String,
+    pub code: String,
+    pub found: bool,
+    pub total: usize,
+    pub items: Vec<String>,
+}
+
+const GEO_PREVIEW_LIMIT: usize = 300;
+
+/// What a "geosite:x" / "geoip:x" entry contains (first entries only).
+#[tauri::command]
+pub async fn get_geo_category(ctx: State<'_, AppContext>, id: Option<String>, entry: String) -> Result<GeoCategory, String> {
+    let lower = entry.trim().to_lowercase();
+    let (kind, code) = if let Some(c) = lower.strip_prefix("geosite:") {
+        ("geosite", c.to_string())
+    } else if let Some(c) = lower.strip_prefix("geoip:") {
+        ("geoip", c.to_string())
+    } else {
+        return Err("Not a geosite: or geoip: entry".to_string());
+    };
+    let dir = geo_dir_for(&ctx, id.as_deref()).await?;
+    let path = dir.join(format!("{}.dat", kind));
+    if !path.exists() {
+        return Err("Geo files are not downloaded yet".to_string());
+    }
+    let code_c = code.clone();
+    let items: Option<Vec<String>> = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<String>>> {
+        let codes = vec![code_c.clone()];
+        Ok(if kind == "geosite" {
+            geo::read_geosite(&path, &codes)?.remove(&code_c).map(|set| {
+                set.suffix.into_iter().map(|d| format!("domain:{}", d))
+                    .chain(set.full.into_iter().map(|d| format!("full:{}", d)))
+                    .chain(set.keyword.into_iter().map(|d| format!("keyword:{}", d)))
+                    .chain(set.regex.into_iter().map(|d| format!("regexp:{}", d)))
+                    .collect()
+            })
+        } else {
+            geo::read_geoip(&path, &codes)?.remove(&code_c)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let found = items.is_some();
+    let mut items = items.unwrap_or_default();
+    let total = items.len();
+    items.truncate(GEO_PREVIEW_LIMIT);
+    Ok(GeoCategory { kind: kind.to_string(), code, found, total, items })
 }
 
 /// Import a `happ://routing/...` (or `nexvpn://routing/...`) link or a raw Happ JSON
@@ -1190,7 +1385,7 @@ pub async fn import_routing_profile(ctx: State<'_, AppContext>, input: String) -
     if state.active_routing_profile != prev_active || (is_active && result.is_some()) {
         reconnect_if_running(&ctx, &state).await;
     }
-    let updated = state.routing_profiles.iter().find(|p| p.id == profile.id).cloned();
+    let updated = state.routing_profiles.iter().find(|p| p.id == profile.id).map(profile_for_ui);
     match result {
         Some(Err(e)) => Err(format!("Profile \"{}\" added, but geo files failed to download: {}", profile.name, e)),
         _ => Ok(updated),
@@ -1252,7 +1447,7 @@ pub async fn update_routing_geo(ctx: State<'_, AppContext>, id: String) -> Resul
     if state.active_routing_profile.as_deref() == Some(id.as_str()) {
         reconnect_if_running(&ctx, &state).await;
     }
-    state.routing_profiles.iter().find(|p| p.id == id).cloned().ok_or_else(|| "Routing profile not found".to_string())
+    state.routing_profiles.iter().find(|p| p.id == id).map(profile_for_ui).ok_or_else(|| "Routing profile not found".to_string())
 }
 
 /// Check if onboarding is completed
@@ -1837,5 +2032,40 @@ fn save_state(state: &AppState) {
     }
     if let Ok(content) = serde_json::to_string_pretty(state) {
         std::fs::write(&path, content).ok();
+    }
+}
+
+#[cfg(test)]
+mod routing_profile_tests {
+    use super::*;
+
+    fn directive(proxy: &[&str]) -> HappDirective {
+        let json = serde_json::json!({ "Name": "Prov", "ProxySites": proxy, "DirectSites": ["geosite:private"] });
+        HappDirective::OnAdd(routing::profile_from_happ_json(&json).unwrap())
+    }
+
+    #[test]
+    fn subscription_updates_keep_edits_until_provider_changes() {
+        let mut state = AppState::default();
+        let id = apply_routing_directive(&mut state, directive(&["geosite:youtube"]), Some("s1")).unwrap();
+        assert_eq!(state.active_routing_profile.as_deref(), Some(id.as_str()));
+
+        // User edits and switches routing off
+        state.routing_profiles[0].proxy_sites.push("geosite:telegram".into());
+        state.active_routing_profile = None;
+        assert!(routing::is_edited(&state.routing_profiles[0]));
+
+        // Same provider version again: edits kept, stays off
+        apply_routing_directive(&mut state, directive(&["geosite:youtube"]), Some("s1"));
+        assert_eq!(state.routing_profiles[0].proxy_sites, vec!["geosite:youtube", "geosite:telegram"]);
+        assert!(state.active_routing_profile.is_none());
+
+        // Provider changes the profile: replaces the edits and re-activates (onadd)
+        apply_routing_directive(&mut state, directive(&["geosite:youtube", "geosite:discord"]), Some("s1"));
+        assert_eq!(state.routing_profiles.len(), 1);
+        assert_eq!(state.routing_profiles[0].id, id);
+        assert_eq!(state.routing_profiles[0].proxy_sites, vec!["geosite:youtube", "geosite:discord"]);
+        assert!(!routing::is_edited(&state.routing_profiles[0]));
+        assert_eq!(state.active_routing_profile.as_deref(), Some(id.as_str()));
     }
 }

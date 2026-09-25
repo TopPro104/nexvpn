@@ -5,15 +5,20 @@ import { t, TranslationKey } from "../../i18n/translations";
 import { showConfirm } from "../../utils/confirm";
 import { Button } from "../ui/Button";
 import { Spinner } from "../ui/Spinner";
+import { Modal } from "../ui/Modal";
 import {
   AlertTriangleIcon,
   CheckCircleIcon,
   ChevronDownIcon,
+  CopyIcon,
   DownloadCloudIcon,
+  EditIcon,
   FolderIcon,
+  PlusIcon,
   RefreshCwIcon,
   TrashIcon,
 } from "../ui/Icons";
+import { GeoPreviewModal, GeoPreviewTarget, RoutingProfileEditor, isGeoEntry } from "./RoutingProfileEditor";
 
 type AppApi = ReturnType<typeof useApp>;
 type EntryKind = "direct" | "proxy" | "block";
@@ -192,17 +197,29 @@ const PROFILE_LISTS: { key: ListKey; label: TranslationKey; kind: EntryKind }[] 
 
 const CHIP_LIMIT = 12;
 
-function ChipList({ items, kind }: { items: string[]; kind?: EntryKind }) {
+function ChipList({ items, kind, onPreview }: { items: string[]; kind?: EntryKind; onPreview?: (entry: string) => void }) {
   const [open, setOpen] = useState(false);
   const shown = open ? items : items.slice(0, CHIP_LIMIT);
   const hidden = items.length - CHIP_LIMIT;
   return (
     <div className="routing-chips">
-      {shown.map((item, i) => (
-        <span key={i} className={`routing-chip routing-entry ${kind ?? ""}`}>
-          {item}
-        </span>
-      ))}
+      {shown.map((item, i) =>
+        onPreview && isGeoEntry(item) ? (
+          <button
+            key={i}
+            type="button"
+            className={`routing-chip routing-entry clickable ${kind ?? ""}`}
+            onClick={() => onPreview(item)}
+            title={t("routing.geoPreviewHint")}
+          >
+            {item}
+          </button>
+        ) : (
+          <span key={i} className={`routing-chip routing-entry ${kind ?? ""}`}>
+            {item}
+          </span>
+        )
+      )}
       {hidden > 0 && (
         <button className="routing-more-btn" onClick={() => setOpen(!open)}>
           {open ? t("routing.showLess") : t("routing.showMore").replace("{n}", String(hidden))}
@@ -212,7 +229,7 @@ function ChipList({ items, kind }: { items: string[]; kind?: EntryKind }) {
   );
 }
 
-function ProfileDetails({ profile: p }: { profile: RoutingProfile }) {
+function ProfileDetails({ profile: p, onPreview }: { profile: RoutingProfile; onPreview: (entry: string) => void }) {
   const hosts = Object.entries(p.dns_hosts ?? {}).map(([host, ip]) => `${host} → ${ip}`);
   const lists = PROFILE_LISTS.filter((l) => (p[l.key]?.length ?? 0) > 0);
 
@@ -256,7 +273,7 @@ function ProfileDetails({ profile: p }: { profile: RoutingProfile }) {
             <div className="routing-detail-label">
               {t(l.label)} ({p[l.key].length})
             </div>
-            <ChipList items={p[l.key]} kind={l.kind} />
+            <ChipList items={p[l.key]} kind={l.kind} onPreview={onPreview} />
           </div>
         ))
       )}
@@ -273,6 +290,38 @@ export function RoutingProfilesSection({ rp }: { rp: RoutingProfilesApi }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [importSource, setImportSource] = useState<"field" | "builtin" | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [preview, setPreview] = useState<GeoPreviewTarget | null>(null);
+  const [linkShown, setLinkShown] = useState<string | null>(null);
+  const editing = rp.profiles.find((p) => p.id === editingId) ?? null;
+
+  const createProfile = async () => {
+    setCreating(true);
+    try {
+      const created = await api.createRoutingProfile(t("routing.newProfileName"));
+      await rp.reload();
+      setEditingId(created.id);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const copyLink = async (p: RoutingProfile) => {
+    try {
+      const link = await api.exportRoutingProfile(p.id);
+      try {
+        await navigator.clipboard.writeText(link);
+        toast(t("routing.linkCopied"), "success");
+      } catch {
+        setLinkShown(link); // clipboard unavailable: show it for manual copy
+      }
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
 
   const importBusy = state.routingImportsPending > 0 || importSource !== null;
   const switching = rp.pendingId !== undefined;
@@ -398,6 +447,11 @@ export function RoutingProfilesSection({ rp }: { rp: RoutingProfilesApi }) {
                           <span className="routing-sub-badge-text">{subName(p)}</span>
                         </span>
                       )}
+                      {p.edited && (
+                        <span className="routing-edited-badge" title={t("routing.editedTitle")}>
+                          {t("routing.edited")}
+                        </span>
+                      )}
                     </div>
                     <div className="routing-chips">
                       <span className={`routing-chip direct${directN ? "" : " zero"}`}>
@@ -435,6 +489,22 @@ export function RoutingProfilesSection({ rp }: { rp: RoutingProfilesApi }) {
                 <div className="routing-profile-actions">
                   <button
                     className="routing-icon-btn"
+                    onClick={() => setEditingId(p.id)}
+                    title={t("routing.editProfile")}
+                    aria-label={t("routing.editProfile")}
+                  >
+                    <EditIcon size={15} />
+                  </button>
+                  <button
+                    className="routing-icon-btn"
+                    onClick={() => copyLink(p)}
+                    title={t("routing.copyLink")}
+                    aria-label={t("routing.copyLink")}
+                  >
+                    <CopyIcon size={15} />
+                  </button>
+                  <button
+                    className="routing-icon-btn"
                     onClick={() => setExpandedId(expanded ? null : p.id)}
                     title={expanded ? t("routing.hideDetails") : t("routing.showDetails")}
                     aria-label={expanded ? t("routing.hideDetails") : t("routing.showDetails")}
@@ -462,7 +532,7 @@ export function RoutingProfilesSection({ rp }: { rp: RoutingProfilesApi }) {
                   </button>
                 </div>
               </div>
-              {expanded && <ProfileDetails profile={p} />}
+              {expanded && <ProfileDetails profile={p} onPreview={(entry) => setPreview({ profileId: p.id, entry })} />}
             </div>
           );
         })}
@@ -535,6 +605,36 @@ export function RoutingProfilesSection({ rp }: { rp: RoutingProfilesApi }) {
           {builtinAdded ? t("routing.builtinAdded") : t("routing.builtinRuDesc")}
         </span>
       </div>
+
+      <div className="routing-builtin">
+        <Button variant="secondary" size="sm" onClick={createProfile} disabled={creating}>
+          {creating ? <Spinner size={14} /> : <PlusIcon size={14} />}
+          <span className="routing-builtin-label">{t("routing.createProfile")}</span>
+        </Button>
+        <span className="routing-builtin-desc">{t("routing.createProfileDesc")}</span>
+      </div>
+
+      <RoutingProfileEditor
+        profile={editing}
+        subscriptionName={editing?.subscription_id ? subName(editing) : null}
+        onClose={() => setEditingId(null)}
+        onSaved={(saved) => {
+          rp.replaceProfile(saved);
+          setEditingId(null);
+          rp.reload();
+        }}
+        onReload={rp.reload}
+      />
+      <GeoPreviewModal target={preview} onClose={() => setPreview(null)} />
+      <Modal open={linkShown !== null} onClose={() => setLinkShown(null)} title={t("routing.linkTitle")}>
+        <textarea
+          className="form-input mono routing-link-box"
+          readOnly
+          value={linkShown ?? ""}
+          onFocus={(e) => e.currentTarget.select()}
+          rows={5}
+        />
+      </Modal>
     </div>
   );
 }

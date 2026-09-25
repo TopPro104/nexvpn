@@ -265,6 +265,10 @@ pub struct RoutingProfile {
     /// `last_updated` value the current geo files were downloaded for
     pub geo_last_updated: String,
     pub geo_error: Option<String>,
+    /// The profile as imported or created (Happ JSON), for "reset to original"
+    pub original: Option<serde_json::Value>,
+    /// Current content differs from `original` (computed when sent to the UI)
+    pub edited: bool,
 }
 
 /// A recorded connection session

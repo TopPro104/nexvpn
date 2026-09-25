@@ -158,6 +158,174 @@ pub fn profile_from_happ_json(json: &Value) -> Result<RoutingProfile> {
     })
 }
 
+/// Happ JSON for a profile (export links, "original" snapshots, edit detection).
+pub fn to_happ_json(p: &RoutingProfile) -> Value {
+    serde_json::json!({
+        "Name": p.name,
+        "GlobalProxy": p.global_proxy.to_string(),
+        "RouteOrder": p.route_order,
+        "RemoteDNSType": p.remote_dns_type,
+        "RemoteDNSDomain": p.remote_dns_domain,
+        "RemoteDNSIP": p.remote_dns_ip,
+        "DomesticDNSType": p.domestic_dns_type,
+        "DomesticDNSDomain": p.domestic_dns_domain,
+        "DomesticDNSIP": p.domestic_dns_ip,
+        "Geoipurl": p.geoip_url,
+        "Geositeurl": p.geosite_url,
+        "LastUpdated": p.last_updated,
+        "DnsHosts": p.dns_hosts,
+        "DirectSites": p.direct_sites,
+        "DirectIp": p.direct_ip,
+        "ProxySites": p.proxy_sites,
+        "ProxyIp": p.proxy_ip,
+        "BlockSites": p.block_sites,
+        "BlockIp": p.block_ip,
+        "DomainStrategy": p.domain_strategy,
+        "FakeDNS": "false"
+    })
+}
+
+/// `happ://routing/add/<base64>` share link
+pub fn export_link(p: &RoutingProfile) -> String {
+    let json = serde_json::to_string(&to_happ_json(p)).unwrap_or_default();
+    format!("happ://routing/add/{}", base64::engine::general_purpose::STANDARD.encode(json))
+}
+
+/// Starting point for a profile created in the app: Russian-friendly DNS, only private
+/// ranges direct, everything else through the proxy.
+pub fn default_profile(name: &str) -> RoutingProfile {
+    profile_from_happ_json(&serde_json::json!({
+        "Name": name,
+        "GlobalProxy": "true",
+        "RouteOrder": "block-proxy-direct",
+        "RemoteDNSType": "DoH",
+        "RemoteDNSDomain": "https://1.1.1.1/dns-query",
+        "RemoteDNSIP": "1.1.1.1",
+        "DomesticDNSType": "DoU",
+        "DomesticDNSIP": "77.88.8.8",
+        "DirectSites": ["geosite:private"],
+        "DirectIp": ["geoip:private"],
+        "DomainStrategy": "IPIfNonMatch"
+    }))
+    .expect("default profile is valid")
+}
+
+/// Content from `content`, identity and bookkeeping (id, subscription, geo status,
+/// original) from `meta`.
+pub fn with_meta_from(mut content: RoutingProfile, meta: &RoutingProfile) -> RoutingProfile {
+    content.id = meta.id.clone();
+    content.subscription_id = meta.subscription_id.clone();
+    content.geo_updated_at = meta.geo_updated_at;
+    content.geo_last_updated = meta.geo_last_updated.clone();
+    content.geo_error = meta.geo_error.clone();
+    content.original = meta.original.clone();
+    content.edited = false;
+    content
+}
+
+pub fn is_edited(p: &RoutingProfile) -> bool {
+    p.original.as_ref().map_or(false, |o| *o != to_happ_json(p))
+}
+
+/// Normalize and check a profile edited in the UI. Returns a readable error listing
+/// what is wrong.
+pub fn validate_profile(mut p: RoutingProfile) -> Result<RoutingProfile> {
+    let mut errors: Vec<String> = Vec::new();
+
+    p.name = p.name.trim().to_string();
+    if p.name.is_empty() {
+        errors.push("Name is empty".to_string());
+    }
+    if !ROUTE_ORDERS.contains(&p.route_order.as_str()) {
+        errors.push(format!("Unknown route order: {}", p.route_order));
+    }
+    if !["AsIs", "IPIfNonMatch", "IPOnDemand"].contains(&p.domain_strategy.as_str()) {
+        errors.push(format!("Unknown domain strategy: {}", p.domain_strategy));
+    }
+
+    for (label, kind, url, ip) in [
+        ("Remote DNS", &mut p.remote_dns_type, &mut p.remote_dns_domain, &mut p.remote_dns_ip),
+        ("Domestic DNS", &mut p.domestic_dns_type, &mut p.domestic_dns_domain, &mut p.domestic_dns_ip),
+    ] {
+        *url = url.trim().to_string();
+        *ip = ip.trim().to_string();
+        if !ip.is_empty() && ip.parse::<IpAddr>().is_err() {
+            errors.push(format!("{}: invalid IP {}", label, ip));
+        }
+        match kind.as_str() {
+            "DoH" => {
+                if url::Url::parse(url).map_or(true, |u| u.scheme() != "https" || u.host_str().is_none()) {
+                    errors.push(format!("{}: DoH needs an https:// URL", label));
+                }
+            }
+            "DoU" => {
+                if ip.is_empty() {
+                    errors.push(format!("{}: DoU needs an IP", label));
+                }
+            }
+            other => errors.push(format!("{}: unknown type {}", label, other)),
+        }
+    }
+
+    for (label, url, default) in [
+        ("Geosite URL", &mut p.geosite_url, DEFAULT_GEOSITE_URL),
+        ("GeoIP URL", &mut p.geoip_url, DEFAULT_GEOIP_URL),
+    ] {
+        *url = url.trim().to_string();
+        if url.is_empty() {
+            *url = default.to_string();
+        } else if url::Url::parse(url).map_or(true, |u| !matches!(u.scheme(), "http" | "https")) {
+            errors.push(format!("{}: not an http(s) URL", label));
+        }
+    }
+
+    let mut hosts = BTreeMap::new();
+    for (host, ip) in &p.dns_hosts {
+        let (host, ip) = (host.trim().to_lowercase(), ip.trim().to_string());
+        if host.is_empty() && ip.is_empty() {
+            continue;
+        }
+        if host.is_empty() || ip.parse::<IpAddr>().is_err() {
+            errors.push(format!("DNS hosts: invalid entry {} → {}", host, ip));
+        }
+        hosts.insert(host, ip);
+    }
+    p.dns_hosts = hosts;
+
+    for (label, list, ip_list) in [
+        ("Direct sites", &mut p.direct_sites, false),
+        ("Direct IP", &mut p.direct_ip, true),
+        ("Proxy sites", &mut p.proxy_sites, false),
+        ("Proxy IP", &mut p.proxy_ip, true),
+        ("Block sites", &mut p.block_sites, false),
+        ("Block IP", &mut p.block_ip, true),
+    ] {
+        let mut seen = HashSet::new();
+        let cleaned: Vec<String> = list
+            .iter()
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty() && seen.insert(e.clone()))
+            .collect();
+        let bad: Vec<&String> = cleaned
+            .iter()
+            .filter(|e| match parse_entry(e, true) {
+                Some(m) => m.is_ip() != ip_list,
+                None => true,
+            })
+            .collect();
+        if !bad.is_empty() {
+            errors.push(format!("Invalid entries in {}: {}", label, bad.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        *list = cleaned;
+    }
+
+    if errors.is_empty() {
+        Ok(p)
+    } else {
+        Err(anyhow!(errors.join("\n")))
+    }
+}
+
 fn value_to_string(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
@@ -647,6 +815,34 @@ mod tests {
         assert_eq!(p.direct_ip, vec!["geoip:ru", "geoip:private"]);
         assert!(p.global_proxy);
         assert_eq!(p.domain_strategy, "IPIfNonMatch");
+    }
+
+    #[test]
+    fn happ_json_round_trips_and_tracks_edits() {
+        let HappDirective::OnAdd(mut p) = parse_happ_routing(ROYALTY).unwrap() else { panic!() };
+        p.original = Some(to_happ_json(&p));
+        assert!(!is_edited(&p));
+        let HappDirective::Add(again) = parse_happ_routing(&export_link(&p)).unwrap() else { panic!() };
+        assert_eq!(to_happ_json(&again), to_happ_json(&p));
+        p.proxy_sites.push("geosite:telegram".into());
+        assert!(is_edited(&p));
+    }
+
+    #[test]
+    fn validates_edits() {
+        let mut p = default_profile("Mine");
+        p.direct_sites = vec![" vk.com ".into(), "vk.com".into(), "geoip:ru".into(), "ext:x:y".into()];
+        p.remote_dns_type = "DoH".into();
+        p.remote_dns_domain = "http://insecure".into();
+        let err = validate_profile(p).unwrap_err().to_string();
+        assert!(err.contains("Invalid entries in Direct sites: geoip:ru, ext:x:y"), "{}", err);
+        assert!(err.contains("Remote DNS: DoH needs an https:// URL"), "{}", err);
+
+        let mut ok = default_profile("Mine");
+        ok.proxy_ip = vec!["1.2.3.4".into(), "geoip:us".into()];
+        ok.geoip_url = String::new();
+        let ok = validate_profile(ok).unwrap();
+        assert_eq!(ok.geoip_url, DEFAULT_GEOIP_URL);
     }
 
     #[test]

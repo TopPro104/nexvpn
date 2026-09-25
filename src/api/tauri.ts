@@ -129,6 +129,21 @@ export interface RoutingProfile {
   subscription_id: string | null; // set when delivered by a subscription
   geo_updated_at: number | null; // unix seconds of last successful geo download
   geo_error: string | null; // last geo download error, if any
+  original: unknown | null; // the version as imported/created (opaque)
+  edited: boolean; // current content differs from `original`
+}
+
+export interface GeoCodes {
+  geosite: string[];
+  geoip: string[];
+}
+
+export interface GeoCategory {
+  kind: "geosite" | "geoip";
+  code: string;
+  found: boolean;
+  total: number;
+  items: string[]; // first 300: "domain:x", "full:x", "keyword:x", "regexp:x" or CIDRs
 }
 
 export interface RoutingProfilesResponse {
@@ -271,6 +286,30 @@ export const api = {
   /** Re-downloads the profile's geo files (slow). */
   updateRoutingGeo: (id: string) =>
     invoke<RoutingProfile>("update_routing_geo", { id }),
+
+  /** New profile from default values (not activated); the name is made unique. */
+  createRoutingProfile: (name: string) =>
+    invoke<RoutingProfile>("create_routing_profile", { name }),
+
+  /** Saves edited content. Rejects with a readable validation error; may download
+   *  geo files when their URLs changed (slow) and reject after saving if that fails. */
+  saveRoutingProfile: (profile: RoutingProfile) =>
+    invoke<RoutingProfile>("save_routing_profile", { profile }),
+
+  /** Restores the version the profile was imported or created with. */
+  resetRoutingProfile: (id: string) =>
+    invoke<RoutingProfile>("reset_routing_profile", { id }),
+
+  /** happ://routing/add/<base64> link with the current content. */
+  exportRoutingProfile: (id: string) =>
+    invoke<string>("export_routing_profile", { id }),
+
+  /** Codes in the downloaded geo files; id null = files used by custom rules. */
+  getGeoCodes: (id: string | null) => invoke<GeoCodes>("get_geo_codes", { id }),
+
+  /** Contents of a "geosite:x" / "geoip:x" entry (first 300 items). */
+  getGeoCategory: (id: string | null, entry: string) =>
+    invoke<GeoCategory>("get_geo_category", { id, entry }),
 
   getOnboardingCompleted: () => invoke<boolean>("get_onboarding_completed"),
 

@@ -5126,3 +5126,279 @@ input[type="number"] {
   color: #fbbf24;
   font-size: 13px;
 }
+
+/* ── Routing profile editor ─────────────────── */
+.modal-content.routing-editor-modal {
+  width: min(780px, calc(100vw - 32px));
+  min-width: 0;
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.routing-editor-modal .modal-body {
+  overflow-y: auto;
+  flex: 1;
+  padding-bottom: 0;
+}
+.modal-content.routing-geo-modal {
+  width: min(560px, calc(100vw - 32px));
+  min-width: 0;
+  max-width: none;
+}
+.routing-editor-section {
+  margin-bottom: 22px;
+}
+.routing-editor-section > .routing-hint {
+  margin: 6px 0 8px;
+}
+.routing-editor-card > .routing-hint {
+  margin: 3px 0 10px;
+}
+.routing-editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+.routing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 8px;
+}
+.routing-editor-grid .routing-field {
+  margin-top: 0;
+}
+.routing-field.wide {
+  grid-column: 1 / -1;
+}
+.routing-field > span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.routing-field .form-input,
+.routing-field .sort-select {
+  width: 100%;
+  min-width: 0;
+}
+.form-input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.routing-editor-card {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+}
+.routing-editor-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.routing-editor-card-title.direct {
+  color: var(--success);
+}
+.routing-editor-card-title.proxy {
+  color: var(--accent);
+}
+.routing-editor-card-title.block {
+  color: var(--danger);
+}
+.routing-editor-card > .btn {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.routing-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.routing-seg button {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.routing-seg button + button {
+  border-left: 1px solid var(--border);
+}
+.routing-seg button.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.routing-chip-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.routing-chip-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.routing-chip-input-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+.routing-chip.editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.routing-chip.editable > span,
+.routing-chip.editable > .routing-chip-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routing-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.routing-chip-remove:hover {
+  opacity: 1;
+}
+.routing-chip-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+button.routing-chip.clickable {
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.routing-host-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.routing-geo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.routing-geo-row .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.routing-editor-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+.routing-editor-footer .routing-busy-hint {
+  margin: 0 0 8px;
+}
+.routing-editor-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.routing-editor-buttons .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.routing-editor-spacer {
+  flex: 1;
+}
+.routing-edited-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning);
+}
+.routing-geo-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+.routing-geo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.routing-geo-items {
+  max-height: 55vh;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.routing-geo-item {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+.routing-link-box {
+  width: 100%;
+  resize: none;
+  word-break: break-all;
+}
+button.routing-rule-domain {
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .modal-content.routing-editor-modal {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    margin: 8px;
+  }
+  .routing-editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .routing-host-row {
+    grid-template-columns: 1fr 1fr 34px;
+  }
+  .routing-editor-buttons .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .routing-editor-spacer {
+    display: none;
+  }
+}
