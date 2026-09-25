@@ -53,6 +53,8 @@ export interface AppState {
   statsTab: StatsTab;
   logsFilter: LogsFilter;
   routingTab: RoutingTab;
+  routingProfilesTick: number; // bumped to make the Routing page reload profiles
+  routingImportsPending: number; // routing profile imports in flight (they can take a minute)
 }
 
 export interface Toast {
@@ -104,6 +106,8 @@ const initialState: AppState = {
   statsTab: "overview" as StatsTab,
   logsFilter: "all" as LogsFilter,
   routingTab: "rules" as RoutingTab,
+  routingProfilesTick: 0,
+  routingImportsPending: 0,
 };
 
 // ── Actions ────────────────────────────────────
@@ -130,7 +134,9 @@ type Action =
   | { type: "SET_SETTINGS_TAB"; tab: SettingsTab }
   | { type: "SET_STATS_TAB"; tab: StatsTab }
   | { type: "SET_LOGS_FILTER"; filter: LogsFilter }
-  | { type: "SET_ROUTING_TAB"; tab: RoutingTab };
+  | { type: "SET_ROUTING_TAB"; tab: RoutingTab }
+  | { type: "BUMP_ROUTING_PROFILES" }
+  | { type: "ROUTING_IMPORT_PENDING"; delta: 1 | -1 };
 
 let toastId = 0;
 
@@ -229,6 +235,13 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, logsFilter: action.filter };
     case "SET_ROUTING_TAB":
       return { ...state, routingTab: action.tab };
+    case "BUMP_ROUTING_PROFILES":
+      return { ...state, routingProfilesTick: state.routingProfilesTick + 1 };
+    case "ROUTING_IMPORT_PENDING":
+      return {
+        ...state,
+        routingImportsPending: Math.max(0, state.routingImportsPending + action.delta),
+      };
     default:
       return state;
   }

@@ -2,9 +2,10 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::proxy::models::*;
+use crate::proxy::routing::{DnsKind, DnsSpec, EffectiveRouting, Matcher, RouteAction};
 
 /// Generate a minimal Xray-core config for a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing_rules: &[RoutingRule], default_route: &str, auth: (&str, &str), api_port: u16) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing: &EffectiveRouting, auth: (&str, &str), api_port: u16) -> Result<Value> {
     let outbound = build_outbound(server)?;
     let (auth_user, auth_pass) = auth;
 
@@ -12,12 +13,7 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
         "log": {
             "loglevel": "warning"
         },
-        "dns": {
-            "servers": [
-                "https+local://1.1.1.1/dns-query",
-                "localhost"
-            ]
-        },
+        "dns": build_xray_dns(routing),
         "stats": {},
         "api": {
             "tag": "api",
@@ -90,8 +86,8 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
             }
         ],
         "routing": {
-            "domainStrategy": "AsIs",
-            "rules": build_xray_routing_rules(routing_rules, default_route)
+            "domainStrategy": if routing.resolve_ips { "IPIfNonMatch" } else { "AsIs" },
+            "rules": build_xray_routing_rules(routing)
         }
     });
 
@@ -282,7 +278,24 @@ fn build_outbound(server: &Server) -> Result<Value> {
     Ok(out)
 }
 
-fn build_xray_routing_rules(routing_rules: &[RoutingRule], default_route: &str) -> Value {
+/// Xray matcher syntax; geo codes missing from the .dat files are dropped because Xray
+/// refuses to start on an unknown code.
+fn xray_entry(m: &Matcher, routing: &EffectiveRouting) -> Option<String> {
+    if !routing.geo_usable_xray(m) {
+        return None;
+    }
+    Some(match m {
+        Matcher::Suffix(d) => format!("domain:{}", d),
+        Matcher::Full(d) => format!("full:{}", d),
+        Matcher::Keyword(d) => format!("keyword:{}", d),
+        Matcher::Regex(d) => format!("regexp:{}", d),
+        Matcher::GeoSite(c) => format!("geosite:{}", c),
+        Matcher::GeoIp(c) => format!("geoip:{}", c),
+        Matcher::Cidr(c) => c.clone(),
+    })
+}
+
+fn build_xray_routing_rules(routing: &EffectiveRouting) -> Value {
     let mut rules = vec![
         json!({
             "inboundTag": ["api-in"],
@@ -291,21 +304,34 @@ fn build_xray_routing_rules(routing_rules: &[RoutingRule], default_route: &str) 
         }),
     ];
 
-    for rule in routing_rules.iter().filter(|r| r.enabled) {
-        let tag = match rule.action {
-            RuleAction::Direct => "direct",
-            RuleAction::Block => "block",
-            RuleAction::Proxy => "proxy",
-        };
-        rules.push(json!({
-            "type": "field",
-            "domain": [format!("domain:{}", rule.domain)],
-            "outboundTag": tag
-        }));
+    // Pin the profile's resolvers: remote through the proxy, domestic direct
+    if let Some(dns) = &routing.dns {
+        for (spec, tag) in [(&dns.remote, "proxy"), (&dns.domestic, "direct")] {
+            if spec.ip.parse::<std::net::IpAddr>().is_ok() {
+                rules.push(json!({ "type": "field", "ip": [spec.ip], "outboundTag": tag }));
+            }
+        }
     }
 
-    // If default is "direct", add a catch-all direct rule (xray uses first outbound as default)
-    if default_route == "direct" {
+    for group in &routing.groups {
+        let tag = match group.action {
+            RouteAction::Direct => "direct",
+            RouteAction::Block => "block",
+            RouteAction::Proxy => "proxy",
+        };
+        // domain and ip in one Xray rule would be ANDed — keep them separate
+        let domains: Vec<String> = group.domains.iter().filter_map(|m| xray_entry(m, routing)).collect();
+        if !domains.is_empty() {
+            rules.push(json!({ "type": "field", "domain": domains, "outboundTag": tag }));
+        }
+        let ips: Vec<String> = group.ips.iter().filter_map(|m| xray_entry(m, routing)).collect();
+        if !ips.is_empty() {
+            rules.push(json!({ "type": "field", "ip": ips, "outboundTag": tag }));
+        }
+    }
+
+    // Unmatched traffic goes to the first outbound (proxy) unless routed direct
+    if !routing.final_proxy {
         rules.push(json!({
             "type": "field",
             "network": "tcp,udp",
@@ -314,4 +340,68 @@ fn build_xray_routing_rules(routing_rules: &[RoutingRule], default_route: &str) 
     }
 
     json!(rules)
+}
+
+fn build_xray_dns(routing: &EffectiveRouting) -> Value {
+    let Some(dns) = &routing.dns else {
+        return json!({
+            "servers": [
+                "https+local://1.1.1.1/dns-query",
+                "localhost"
+            ]
+        });
+    };
+
+    let mut hosts = serde_json::Map::new();
+    for (host, ip) in &dns.hosts {
+        hosts.insert(host.clone(), json!(ip));
+    }
+    // "+local" DoH skips routing (direct); plain DoH/UDP go through the rules pinned above
+    let address = |spec: &DnsSpec, local: bool, hosts: &mut serde_json::Map<String, Value>| -> String {
+        match (&spec.kind, spec.doh_parts()) {
+            (DnsKind::DoH, Some((host, _, _))) => {
+                if host.parse::<std::net::IpAddr>().is_err() && !spec.ip.is_empty() {
+                    hosts.entry(host.to_lowercase()).or_insert_with(|| json!(spec.ip));
+                }
+                if local { spec.url.replacen("https://", "https+local://", 1) } else { spec.url.clone() }
+            }
+            _ => spec.ip.clone(),
+        }
+    };
+    let remote = address(&dns.remote, false, &mut hosts);
+    let domestic = address(&dns.domestic, true, &mut hosts);
+
+    let direct_domains: Vec<String> = routing
+        .groups
+        .iter()
+        .filter(|g| g.action == RouteAction::Direct)
+        .flat_map(|g| g.domains.iter())
+        .filter_map(|m| xray_entry(m, routing))
+        .collect();
+
+    let mut servers = vec![json!(remote)];
+    let mut domestic_server = json!({ "address": domestic, "skipFallback": true });
+    if !direct_domains.is_empty() {
+        domestic_server["domains"] = json!(direct_domains);
+    }
+    servers.push(domestic_server);
+    if !routing.final_proxy {
+        // Direct by default: unmatched names resolve directly, proxied ones remotely
+        servers.reverse();
+        servers[0] = json!(domestic);
+        let proxy_domains: Vec<String> = routing
+            .groups
+            .iter()
+            .filter(|g| g.action == RouteAction::Proxy)
+            .flat_map(|g| g.domains.iter())
+            .filter_map(|m| xray_entry(m, routing))
+            .collect();
+        let mut remote_server = json!({ "address": remote, "skipFallback": true });
+        if !proxy_domains.is_empty() {
+            remote_server["domains"] = json!(proxy_domains);
+        }
+        servers[1] = remote_server;
+    }
+
+    json!({ "hosts": hosts, "servers": servers })
 }

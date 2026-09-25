@@ -2084,6 +2084,379 @@ input[type="number"] {
 .routing-rule-delete:hover {
   color: var(--danger);
 }
+.routing-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: -4px 0 12px;
+}
+.routing-syntax-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* Routing profiles (Happ format) */
+.routing-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.routing-profile-list.switching .routing-profile-main {
+  cursor: progress;
+}
+.routing-profile-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  min-width: 0;
+  transition: all 0.2s;
+}
+.routing-profile-card:hover {
+  border-color: var(--border-hover);
+}
+.routing-profile-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+}
+.routing-profile-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.routing-profile-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  border-radius: 6px;
+  outline: none;
+}
+.routing-profile-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.routing-profile-main > .spinner {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.routing-radio {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--border-hover);
+  flex-shrink: 0;
+}
+.routing-profile-card.active .routing-radio {
+  border-color: var(--accent);
+}
+.routing-profile-card.active .routing-radio::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.routing-profile-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.routing-profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.routing-profile-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.routing-profile-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.routing-sub-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.routing-sub-badge svg {
+  flex-shrink: 0;
+}
+.routing-sub-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.routing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.routing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.routing-chip b {
+  font-weight: 700;
+}
+.routing-chip.direct {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 25%, transparent);
+}
+.routing-chip.proxy {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.routing-chip.block {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.routing-chip.zero {
+  opacity: 0.5;
+}
+.routing-chip.routing-entry {
+  display: inline-block;
+  font-family: 'Consolas', 'Fira Code', monospace;
+  overflow-wrap: anywhere;
+}
+.routing-profile-geo {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  min-width: 0;
+}
+.routing-profile-geo svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.routing-profile-geo span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.routing-profile-geo.error {
+  color: var(--danger);
+}
+.routing-profile-loading {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+.routing-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.routing-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.routing-icon-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.routing-icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+.routing-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.routing-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.routing-chevron {
+  transition: transform 0.2s ease;
+}
+.routing-chevron.open {
+  transform: rotate(180deg);
+}
+.routing-profile-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.routing-detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.routing-detail-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 150px;
+  flex-shrink: 0;
+}
+.routing-detail-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.routing-detail-value.mono {
+  font-family: 'Consolas', 'Fira Code', monospace;
+  font-size: 11px;
+}
+.routing-detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.routing-detail-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.routing-more-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.routing-more-btn:hover {
+  text-decoration: underline;
+}
+.routing-profile-import {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.routing-profile-import .form-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.routing-profile-import .btn {
+  flex-shrink: 0;
+  min-width: 72px;
+}
+.routing-busy-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.routing-busy-hint .spinner {
+  flex-shrink: 0;
+}
+.routing-builtin {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 12px;
+  min-width: 0;
+}
+.routing-builtin .btn {
+  max-width: 100%;
+}
+.routing-builtin-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.routing-builtin-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  min-width: 0;
+}
+
+/* Default route while a routing profile is active */
+.routing-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.routing-lock-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.routing-lock-note span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.vpn-mode-group.routing-locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
 
 /* ══════════════════════════════════════════════
    STYLE VARIANTS
@@ -3435,6 +3808,11 @@ input[type="number"] {
   .routing-domain-input {
     min-width: 0;
     width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .routing-action-select {
+    flex: 1;
   }
 
   .routing-presets {
@@ -3447,6 +3825,57 @@ input[type="number"] {
 
   .routing-rule-delete {
     opacity: 0.6;
+  }
+
+  .routing-profile-card {
+    padding: 10px;
+  }
+
+  .routing-profile-top {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .routing-profile-main {
+    flex-basis: 100%;
+  }
+
+  /* Actions get their own row so the name and chips keep the full width */
+  .routing-profile-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .routing-icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .routing-detail-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .routing-detail-label {
+    min-width: 0;
+  }
+
+  .routing-profile-import {
+    flex-wrap: wrap;
+  }
+
+  .routing-profile-import .form-input {
+    flex-basis: 100%;
+  }
+
+  .routing-profile-import .btn {
+    flex: 1;
+  }
+
+  .routing-builtin .btn {
+    white-space: normal;
+    text-align: left;
   }
 
   /* ── Modal ── */

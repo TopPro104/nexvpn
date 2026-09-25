@@ -42,7 +42,7 @@ src/                          # React frontend
     home/                     # StatusPanel, TrafficPanel, ServerList, ServerCard, QuickConnect, AnnounceBanner, WorldMap
     subscriptions/            # SubList (compact/expandable cards), AddSubModal
     settings/                 # SettingsPage, PerAppVpn
-    routing/                  # RoutingPage (domain rules, presets)
+    routing/                  # RoutingPage (custom rules, presets), RoutingProfiles (Happ profiles)
     stats/                    # StatsPage (dashboard, history, traffic chart)
     logs/                     # LogsPage (Core/App subtabs)
     ui/                       # Button, Modal, Spinner, Toast, ConfirmDialog, Icons, Flag
@@ -59,10 +59,12 @@ src-tauri/                    # Rust backend
       manager.rs              # CoreManager — start/stop cores, health check, logs, traffic stats
       singbox.rs              # sing-box config generation
       xray.rs                 # Xray config generation
+      geo.rs                  # geosite.dat/geoip.dat reader → sing-box rule-sets, geo downloader
     proxy/
       models.rs               # Server, Subscription, Settings, AppState, etc.
       subscription.rs         # Fetch subscription URL, parse headers (metadata, announce, traffic)
       link_parser.rs          # Parse vless://, vmess://, ss://, trojan://, hy2:// links
+      routing.rs              # Happ routing profiles (happ://routing/...), rule entries, EffectiveRouting
     system/
       hwid.rs                 # Device fingerprint (HWID, platform, model)
       proxy_setter.rs         # Windows/macOS system proxy toggle
@@ -74,7 +76,11 @@ src-tauri/                    # Rust backend
 
 ## Key Architecture
 
-- **Subscription metadata**: Headers parsed — `Profile-Update-Interval`, `Subscription-Userinfo`, `Support-Url`, `Announce`, `Subscription-Refill-Date`
+- **Subscription metadata**: Headers parsed — `Profile-Update-Interval`, `Subscription-Userinfo`, `Support-Url`, `Announce`, `Subscription-Refill-Date`, `Routing` (+ `Routing-Enable`)
+- **Routing**: custom rules (user) → private ranges direct → active Happ profile lists in `RouteOrder` → final (`GlobalProxy` / default route). `EffectiveRouting` in `proxy/routing.rs` is the single source for both cores. Profiles come from `happ://routing/add|onadd/<b64>` links, raw JSON, the subscription `routing` header/body line, or the `routing` block of happ-style JSON subs; one profile per subscription, deleted with it
+- **Geo files**: per profile in `<data>/geo/<profile id>/` (`default/` = Loyalsoldier for custom geosite rules). Xray reads them via `XRAY_LOCATION_ASSET`; sing-box gets per-code source rule-sets built by `core/geo.rs`. Unknown codes are dropped (Xray won't start with them). Refreshed on new `LastUpdated`/URL or after 7 days
+- **DNS with a profile**: remote resolver through the proxy (DoU → TCP in sing-box), domestic resolver direct, `DnsHosts` pinned; domains of direct lists resolve domestically. `IPIfNonMatch` = sing-box `resolve` action before a second pass of IP rules
+- **Xray TUN bridge**: the xray process is excluded from the TUN by `process_name` (route + DNS), otherwise direct traffic loops
 - **Auto-update**: Frontend timer based on `update_interval` from subscription headers
 - **TUN mode**: sing-box has native TUN. Xray — TUN not supported on desktop (only proxy mode)
 - **Android VPN**: VpnService + tun2socks on Java side, Rust just manages core process

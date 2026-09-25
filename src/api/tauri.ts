@@ -103,6 +103,39 @@ export interface RoutingRulesResponse {
   default_route: string;
 }
 
+/** Happ-compatible routing profile (https://routing.happ.su). */
+export interface RoutingProfile {
+  id: string;
+  name: string;
+  global_proxy: boolean; // true: traffic matching no rule goes via proxy; false: goes direct
+  route_order: string; // e.g. "block-proxy-direct"
+  remote_dns_type: string; // "DoH" | "DoU" (resolved through the proxy)
+  remote_dns_domain: string; // DoH URL (empty for DoU)
+  remote_dns_ip: string;
+  domestic_dns_type: string; // "DoH" | "DoU" (resolved directly)
+  domestic_dns_domain: string;
+  domestic_dns_ip: string;
+  geoip_url: string;
+  geosite_url: string;
+  last_updated: string; // unix seconds as string, may be ""
+  dns_hosts: Record<string, string>;
+  direct_sites: string[];
+  direct_ip: string[];
+  proxy_sites: string[];
+  proxy_ip: string[];
+  block_sites: string[];
+  block_ip: string[];
+  domain_strategy: string; // "AsIs" | "IPIfNonMatch" | "IPOnDemand"
+  subscription_id: string | null; // set when delivered by a subscription
+  geo_updated_at: number | null; // unix seconds of last successful geo download
+  geo_error: string | null; // last geo download error, if any
+}
+
+export interface RoutingProfilesResponse {
+  profiles: RoutingProfile[];
+  active_id: string | null;
+}
+
 export interface IpCheckResult {
   ip: string;
   country: string;
@@ -217,6 +250,27 @@ export const api = {
 
   saveRoutingRules: (rules: RoutingRule[], defaultRoute: string) =>
     invoke<void>("save_routing_rules", { rules, defaultRoute }),
+
+  // Routing profiles (Happ format)
+  getRoutingProfiles: () =>
+    invoke<RoutingProfilesResponse>("get_routing_profiles"),
+
+  /** Accepts happ://routing/add|onadd/<b64>, happ://routing/off, the same with
+   *  nexvpn://, or raw Happ JSON. Downloads geo files first (slow). Resolves to
+   *  null for ".../off", which disables profile routing. */
+  importRoutingProfile: (input: string) =>
+    invoke<RoutingProfile | null>("import_routing_profile", { input }),
+
+  /** null = off. The backend reconnects if connected. */
+  setActiveRoutingProfile: (id: string | null) =>
+    invoke<void>("set_active_routing_profile", { id }),
+
+  deleteRoutingProfile: (id: string) =>
+    invoke<void>("delete_routing_profile", { id }),
+
+  /** Re-downloads the profile's geo files (slow). */
+  updateRoutingGeo: (id: string) =>
+    invoke<RoutingProfile>("update_routing_geo", { id }),
 
   getOnboardingCompleted: () => invoke<boolean>("get_onboarding_completed"),
 

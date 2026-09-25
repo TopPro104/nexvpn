@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::Mutex;
 
-use crate::core::manager::CoreManager;
+use crate::core::{geo, manager::CoreManager};
+use crate::proxy::routing::{self, EffectiveRouting, HappDirective, RoutingInput};
 use crate::proxy::{link_parser, models::*, subscription};
 use crate::system::{hwid, proxy_setter};
 use crate::testing::ping;
@@ -252,7 +253,7 @@ pub async fn add_subscription(
         let s = &ctx.state.lock().await.settings;
         (s.hwid_enabled, s.happ_ua)
     };
-    let (sub, servers) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
+    let (sub, servers, routing_directive) = subscription::fetch_subscription(&url, name.as_deref(), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to fetch subscription: {}", e))?;
 
@@ -263,9 +264,14 @@ pub async fn add_subscription(
     let infos: Vec<ServerInfo> = servers.iter().map(ServerInfo::from).collect();
 
     let mut state = ctx.state.lock().await;
+    let sub_id = sub.id.clone();
     state.servers.extend(servers);
     state.subscriptions.push(sub);
+    let profile_id = routing_directive.and_then(|d| apply_routing_directive(&mut state, d, Some(&sub_id)));
     save_state(&state);
+    if let Some(pid) = profile_id {
+        spawn_geo_refresh(&ctx, &state, &pid);
+    }
 
     Ok(infos)
 }
@@ -295,8 +301,10 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
         .ok_or("Server not found")?;
 
     let tun_mode = state.settings.vpn_mode == "tun";
-    let routing_rules = state.routing_rules.clone();
-    let default_route = state.default_route.clone();
+    // First connect after importing a profile whose geo download failed, or custom
+    // geosite/geoip rules without a profile: fetch the files now.
+    ensure_geo_files(&ctx, &mut state).await;
+    let routing = routing_input(&state);
     let per_app_mode = state.settings.per_app_mode.clone();
     let per_app_list = state.settings.per_app_list.clone();
     let stealth = state.settings.stealth_mode;
@@ -309,7 +317,7 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
     }
 
     ctx.core
-        .start(&server, tun_mode, &routing_rules, &default_route, &per_app_mode, &per_app_list, stealth)
+        .start(&server, tun_mode, &routing, &per_app_mode, &per_app_list, stealth)
         .await
         .map_err(|e| humanize_core_error(&e.to_string(), tun_mode))?;
 
@@ -439,16 +447,16 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
     save_state(&state);
 
     if was_running {
+        ensure_geo_files(&ctx, &mut state).await;
         if let Some(id) = &state.active_server_id {
             if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
                 let s = server.clone();
                 let tun_mode = state.settings.vpn_mode == "tun";
-                let rules = state.routing_rules.clone();
-                let dr = state.default_route.clone();
+                let routing = routing_input(&state);
                 let pam = state.settings.per_app_mode.clone();
                 let pal = state.settings.per_app_list.clone();
                 let stl = state.settings.stealth_mode;
-                ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
+                ctx.core.start(&s, tun_mode, &routing, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
             }
         }
     }
@@ -554,7 +562,7 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
     let happ_ua = state.settings.happ_ua;
     drop(state);
 
-    let (new_sub, new_servers) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
+    let (new_sub, new_servers, routing_directive) = subscription::fetch_subscription(&sub.url, Some(&sub.name), hwid_enabled, happ_ua, Some(ctx.app_logs.clone()))
         .await
         .map_err(|e| format!("Failed to update subscription: {}", e))?;
 
@@ -617,7 +625,11 @@ pub async fn update_subscription(ctx: State<'_, AppContext>, subscription_id: St
         existing.refill_date = new_sub.refill_date;
     }
 
+    let profile_id = routing_directive.and_then(|d| apply_routing_directive(&mut state, d, Some(&subscription_id)));
     save_state(&state);
+    if let Some(pid) = profile_id {
+        spawn_geo_refresh(&ctx, &state, &pid);
+    }
     Ok(infos)
 }
 
@@ -627,6 +639,7 @@ pub async fn delete_subscription(ctx: State<'_, AppContext>, subscription_id: St
     let mut state = ctx.state.lock().await;
     state.servers.retain(|s| s.subscription_id.as_deref() != Some(&subscription_id));
     state.subscriptions.retain(|s| s.id != subscription_id);
+    remove_subscription_profiles(&ctx, &mut state, &subscription_id);
     save_state(&state);
     Ok(())
 }
@@ -752,13 +765,12 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
                 if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
                     let s = server.clone();
                     let tun_mode = state.settings.vpn_mode == "tun";
-                    let rules = state.routing_rules.clone();
-                    let dr = state.default_route.clone();
+                    let routing = routing_input(&state);
                     let pam = state.settings.per_app_mode.clone();
                     let pal = state.settings.per_app_list.clone();
                     let stl = state.settings.stealth_mode;
                     // Reconnect with new ports (state stays locked so connect/disconnect can't interleave)
-                    if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
+                    if let Err(e) = ctx.core.start(&s, tun_mode, &routing, &pam, &pal, stl).await {
                         log::error!("Failed to reconnect with new ports: {}", e);
                     }
                     // Update system proxy with current HTTP port (only in proxy mode)
@@ -915,23 +927,332 @@ pub async fn save_routing_rules(
 
     // If connected, reconnect to apply new rules
     if ctx.core.is_running().await {
-        if let Some(id) = &state.active_server_id {
-            if let Some(server) = state.servers.iter().find(|s| &s.id == id) {
-                let s = server.clone();
-                let tun_mode = state.settings.vpn_mode == "tun";
-                let rules = state.routing_rules.clone();
-                let dr = state.default_route.clone();
-                let pam = state.settings.per_app_mode.clone();
-                let pal = state.settings.per_app_list.clone();
-                let stl = state.settings.stealth_mode;
-                if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
-                    log::error!("Failed to reconnect with new routing rules: {}", e);
-                }
-            }
-        }
+        ensure_geo_files(&ctx, &mut state).await;
+        reconnect_if_running(&ctx, &state).await;
     }
 
     Ok(())
+}
+
+// ── Routing profiles ───────────────────────────────────
+
+fn active_profile(state: &AppState) -> Option<&RoutingProfile> {
+    let id = state.active_routing_profile.as_ref()?;
+    state.routing_profiles.iter().find(|p| &p.id == id)
+}
+
+fn routing_input(state: &AppState) -> RoutingInput {
+    RoutingInput {
+        rules: state.routing_rules.clone(),
+        default_route: state.default_route.clone(),
+        profile: active_profile(state).cloned(),
+    }
+}
+
+/// Restart the core with the current routing if it is running (caller holds the state lock).
+async fn reconnect_if_running(ctx: &AppContext, state: &AppState) {
+    if !ctx.core.is_running().await {
+        return;
+    }
+    let Some(server) = state
+        .active_server_id
+        .as_ref()
+        .and_then(|id| state.servers.iter().find(|s| &s.id == id))
+        .cloned()
+    else {
+        return;
+    };
+    let tun_mode = state.settings.vpn_mode == "tun";
+    let s = &state.settings;
+    if let Err(e) = ctx.core.start(&server, tun_mode, &routing_input(state), &s.per_app_mode, &s.per_app_list, s.stealth_mode).await {
+        log::error!("Failed to reconnect with new routing: {}", e);
+    }
+}
+
+fn geo_urls(profile: Option<&RoutingProfile>) -> (String, String) {
+    match profile {
+        Some(p) => (p.geosite_url.clone(), p.geoip_url.clone()),
+        None => (routing::DEFAULT_GEOSITE_URL.to_string(), routing::DEFAULT_GEOIP_URL.to_string()),
+    }
+}
+
+/// Identifies the geo file version a profile asks for; a change means re-download.
+fn geo_source_key(p: &RoutingProfile) -> String {
+    format!("{}|{}|{}", p.geosite_url, p.geoip_url, p.last_updated)
+}
+
+fn profile_uses_geo(p: &RoutingProfile) -> bool {
+    EffectiveRouting::build(&[], "proxy", Some(p)).needs_geo()
+}
+
+const GEO_MAX_AGE_SECS: u64 = 7 * 24 * 3600;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
+}
+
+/// Missing files, a new LastUpdated/URL, or files older than a week (the "latest"
+/// release URLs providers use change daily).
+fn geo_needs_refresh(p: &RoutingProfile, geo_root: &std::path::Path) -> bool {
+    if !profile_uses_geo(p) {
+        return false;
+    }
+    let dir = routing::geo_dir(geo_root, Some(p));
+    !dir.join("geosite.dat").exists()
+        || !dir.join("geoip.dat").exists()
+        || p.geo_last_updated != geo_source_key(p)
+        || p.geo_updated_at.map_or(true, |t| now_secs().saturating_sub(t) > GEO_MAX_AGE_SECS)
+}
+
+async fn download_geo(dir: &std::path::Path, geosite_url: &str, geoip_url: &str) -> anyhow::Result<()> {
+    log::info!("Downloading geo files into {}", dir.display());
+    let (site_path, ip_path) = (dir.join("geosite.dat"), dir.join("geoip.dat"));
+    tokio::try_join!(
+        geo::download_file(geosite_url, &site_path),
+        geo::download_file(geoip_url, &ip_path),
+    )?;
+    Ok(())
+}
+
+fn record_geo_result(state: &mut AppState, profile: &RoutingProfile, result: &anyhow::Result<()>) {
+    if let Some(p) = state.routing_profiles.iter_mut().find(|p| p.id == profile.id) {
+        match result {
+            Ok(()) => {
+                p.geo_updated_at = Some(now_secs());
+                p.geo_last_updated = geo_source_key(profile);
+                p.geo_error = None;
+            }
+            Err(e) => p.geo_error = Some(e.to_string()),
+        }
+    }
+}
+
+/// Download geo files that the current routing needs but that are not on disk yet.
+async fn ensure_geo_files(ctx: &AppContext, state: &mut AppState) {
+    let input = routing_input(state);
+    if !EffectiveRouting::build(&input.rules, &input.default_route, input.profile.as_ref()).needs_geo() {
+        return;
+    }
+    let dir = routing::geo_dir(&ctx.core.geo_root(), input.profile.as_ref());
+    if dir.join("geosite.dat").exists() && dir.join("geoip.dat").exists() {
+        return;
+    }
+    let (site, ip) = geo_urls(input.profile.as_ref());
+    let result = download_geo(&dir, &site, &ip).await;
+    if let Err(e) = &result {
+        log::warn!("Geo files download failed, geosite/geoip rules will be skipped: {}", e);
+    }
+    if let Some(p) = &input.profile {
+        record_geo_result(state, p, &result);
+        save_state(state);
+    }
+}
+
+/// Refresh a profile's geo files in the background (subscription updates). The new files
+/// take effect on the next connect.
+fn spawn_geo_refresh(ctx: &AppContext, state: &AppState, profile_id: &str) {
+    let Some(profile) = state.routing_profiles.iter().find(|p| p.id == profile_id).cloned() else { return };
+    let geo_root = ctx.core.geo_root();
+    if !geo_needs_refresh(&profile, &geo_root) {
+        return;
+    }
+    let shared = ctx.state.clone();
+    tauri::async_runtime::spawn(async move {
+        let dir = routing::geo_dir(&geo_root, Some(&profile));
+        let result = download_geo(&dir, &profile.geosite_url, &profile.geoip_url).await;
+        if let Err(e) = &result {
+            log::warn!("Geo files for routing profile '{}' failed to download: {}", profile.name, e);
+        }
+        let mut st = shared.lock().await;
+        record_geo_result(&mut st, &profile, &result);
+        save_state(&st);
+    });
+}
+
+/// Add/replace/activate a profile from a Happ directive. Returns the affected profile id.
+/// Subscriptions carry at most one profile each; manual imports are matched by name.
+fn apply_routing_directive(state: &mut AppState, directive: HappDirective, subscription_id: Option<&str>) -> Option<String> {
+    let (mut profile, onadd) = match directive {
+        HappDirective::Off => {
+            // A subscription may only switch off its own profile
+            let owned = active_profile(state)
+                .map_or(false, |p| subscription_id.is_none() || p.subscription_id.as_deref() == subscription_id);
+            if owned {
+                state.active_routing_profile = None;
+            }
+            return None;
+        }
+        HappDirective::Add(p) => (p, false),
+        HappDirective::OnAdd(p) => (p, true),
+    };
+    profile.subscription_id = subscription_id.map(String::from);
+
+    let existing = state.routing_profiles.iter_mut().find(|p| match subscription_id {
+        Some(sid) => p.subscription_id.as_deref() == Some(sid),
+        None => p.subscription_id.is_none() && p.name == profile.name,
+    });
+    let (id, is_new, changed) = match existing {
+        Some(p) => {
+            profile.id = p.id.clone();
+            profile.geo_updated_at = p.geo_updated_at;
+            profile.geo_last_updated = p.geo_last_updated.clone();
+            profile.geo_error = p.geo_error.clone();
+            let changed = *p != profile;
+            *p = profile;
+            (p.id.clone(), false, changed)
+        }
+        None => {
+            profile.id = uuid::Uuid::new_v4().to_string();
+            let id = profile.id.clone();
+            state.routing_profiles.push(profile);
+            (id, true, true)
+        }
+    };
+
+    let nothing_active = state.active_routing_profile.is_none();
+    let activate = match subscription_id {
+        // Subscriptions resend the profile on every update: only (re)activate a new or
+        // changed one, so switching it off by hand sticks until the provider changes it
+        Some(_) => (onadd && changed) || (is_new && nothing_active),
+        None => onadd || nothing_active,
+    };
+    if activate {
+        state.active_routing_profile = Some(id.clone());
+    }
+    Some(id)
+}
+
+/// Remove a subscription's profile(s) and their geo files.
+fn remove_subscription_profiles(ctx: &AppContext, state: &mut AppState, subscription_id: &str) {
+    let geo_root = ctx.core.geo_root();
+    let (removed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut state.routing_profiles)
+        .into_iter()
+        .partition(|p| p.subscription_id.as_deref() == Some(subscription_id));
+    state.routing_profiles = kept;
+    for p in removed {
+        if state.active_routing_profile.as_deref() == Some(&p.id) {
+            state.active_routing_profile = None;
+        }
+        let _ = std::fs::remove_dir_all(routing::geo_dir(&geo_root, Some(&p)));
+    }
+}
+
+#[derive(Serialize)]
+pub struct RoutingProfilesResponse {
+    pub profiles: Vec<RoutingProfile>,
+    pub active_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_routing_profiles(ctx: State<'_, AppContext>) -> Result<RoutingProfilesResponse, String> {
+    let state = ctx.state.lock().await;
+    Ok(RoutingProfilesResponse {
+        profiles: state.routing_profiles.clone(),
+        active_id: active_profile(&state).map(|p| p.id.clone()),
+    })
+}
+
+/// Import a `happ://routing/...` (or `nexvpn://routing/...`) link or a raw Happ JSON
+/// profile. Downloads its geo files before returning. `None` = the link turned routing off.
+#[tauri::command]
+pub async fn import_routing_profile(ctx: State<'_, AppContext>, input: String) -> Result<Option<RoutingProfile>, String> {
+    let directive = routing::parse_happ_routing(&input).map_err(|e| e.to_string())?;
+
+    let (profile, prev_active) = {
+        let mut state = ctx.state.lock().await;
+        let prev_active = state.active_routing_profile.clone();
+        let Some(id) = apply_routing_directive(&mut state, directive, None) else {
+            save_state(&state);
+            if prev_active.is_some() {
+                reconnect_if_running(&ctx, &state).await;
+            }
+            return Ok(None);
+        };
+        save_state(&state);
+        let profile = state.routing_profiles.iter().find(|p| p.id == id).cloned().ok_or("Profile lost")?;
+        (profile, prev_active)
+    };
+
+    // Download without holding the state lock; it can take a while
+    let result = if geo_needs_refresh(&profile, &ctx.core.geo_root()) {
+        let dir = routing::geo_dir(&ctx.core.geo_root(), Some(&profile));
+        Some(download_geo(&dir, &profile.geosite_url, &profile.geoip_url).await)
+    } else {
+        None
+    };
+
+    let mut state = ctx.state.lock().await;
+    if let Some(r) = &result {
+        record_geo_result(&mut state, &profile, r);
+        save_state(&state);
+    }
+    let is_active = state.active_routing_profile.as_deref() == Some(profile.id.as_str());
+    if state.active_routing_profile != prev_active || (is_active && result.is_some()) {
+        reconnect_if_running(&ctx, &state).await;
+    }
+    let updated = state.routing_profiles.iter().find(|p| p.id == profile.id).cloned();
+    match result {
+        Some(Err(e)) => Err(format!("Profile \"{}\" added, but geo files failed to download: {}", profile.name, e)),
+        _ => Ok(updated),
+    }
+}
+
+/// Activate a profile (`None` = profile routing off). Applies immediately when connected.
+#[tauri::command]
+pub async fn set_active_routing_profile(ctx: State<'_, AppContext>, id: Option<String>) -> Result<(), String> {
+    let mut state = ctx.state.lock().await;
+    if let Some(id) = &id {
+        if !state.routing_profiles.iter().any(|p| &p.id == id) {
+            return Err("Routing profile not found".to_string());
+        }
+    }
+    if state.active_routing_profile == id {
+        return Ok(());
+    }
+    state.active_routing_profile = id;
+    save_state(&state);
+    if ctx.core.is_running().await {
+        ensure_geo_files(&ctx, &mut state).await;
+        reconnect_if_running(&ctx, &state).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_routing_profile(ctx: State<'_, AppContext>, id: String) -> Result<(), String> {
+    let mut state = ctx.state.lock().await;
+    let pos = state.routing_profiles.iter().position(|p| p.id == id).ok_or("Routing profile not found")?;
+    let profile = state.routing_profiles.remove(pos);
+    let was_active = state.active_routing_profile.as_deref() == Some(id.as_str());
+    if was_active {
+        state.active_routing_profile = None;
+    }
+    save_state(&state);
+    let _ = std::fs::remove_dir_all(routing::geo_dir(&ctx.core.geo_root(), Some(&profile)));
+    if was_active {
+        reconnect_if_running(&ctx, &state).await;
+    }
+    Ok(())
+}
+
+/// Re-download a profile's geo files now.
+#[tauri::command]
+pub async fn update_routing_geo(ctx: State<'_, AppContext>, id: String) -> Result<RoutingProfile, String> {
+    let profile = {
+        let state = ctx.state.lock().await;
+        state.routing_profiles.iter().find(|p| p.id == id).cloned().ok_or("Routing profile not found")?
+    };
+    let dir = routing::geo_dir(&ctx.core.geo_root(), Some(&profile));
+    let result = download_geo(&dir, &profile.geosite_url, &profile.geoip_url).await;
+
+    let mut state = ctx.state.lock().await;
+    record_geo_result(&mut state, &profile, &result);
+    save_state(&state);
+    result.map_err(|e| format!("Geo files download failed: {}", e))?;
+    if state.active_routing_profile.as_deref() == Some(id.as_str()) {
+        reconnect_if_running(&ctx, &state).await;
+    }
+    state.routing_profiles.iter().find(|p| p.id == id).cloned().ok_or_else(|| "Routing profile not found".to_string())
 }
 
 /// Check if onboarding is completed

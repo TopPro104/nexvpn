@@ -3,6 +3,8 @@ import { useApp } from "../../context/AppContext";
 import { api, RoutingRule, RuleAction } from "../../api/tauri";
 import { t, getLang } from "../../i18n/translations";
 import { PerAppVpn } from "../settings/PerAppVpn";
+import { InfoIcon } from "../ui/Icons";
+import { RoutingProfilesSection, useRoutingProfiles } from "./RoutingProfiles";
 
 export interface Preset {
   id: string;
@@ -63,6 +65,12 @@ export function RoutingPage() {
   const [newAction, setNewAction] = useState<RuleAction>("direct");
   const [presets, setPresets] = useState<Preset[]>(FALLBACK_PRESETS);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const routingProfiles = useRoutingProfiles();
+  const activeProfile = routingProfiles.activeProfile;
+  // With an active profile, its GlobalProxy decides where unmatched traffic goes
+  const effectiveRoute = activeProfile
+    ? activeProfile.global_proxy ? "proxy" : "direct"
+    : state.defaultRoute;
 
   useEffect(() => {
     fetch(PRESETS_URL)
@@ -97,12 +105,17 @@ export function RoutingPage() {
   );
 
   const setDefaultRoute = (route: string) => {
+    if (activeProfile) return; // ignored by the backend while a profile is active
     save(state.routingRules, route);
   };
 
   const addRule = () => {
-    const domain = newDomain.trim().toLowerCase();
-    if (!domain) return;
+    const raw = newDomain.trim();
+    if (!raw) return;
+    // Regular expressions are case-sensitive; everything else is normalised to lowercase
+    const domain = /^regexp:/i.test(raw)
+      ? "regexp:" + raw.slice("regexp:".length)
+      : raw.toLowerCase();
     if (state.routingRules.some((r) => r.domain === domain)) {
       toast(`Rule for ${domain} already exists`, "error");
       return;
@@ -173,18 +186,33 @@ export function RoutingPage() {
 
   return (
     <div className="routing-page">
+      <RoutingProfilesSection rp={routingProfiles} />
+
       {/* Default route toggle */}
       <div className="settings-section">
         <div className="settings-label">{t("routing.defaultRoute")}</div>
-        <div className="vpn-mode-group">
+        {activeProfile && (
+          <div className="routing-lock-note">
+            <InfoIcon size={14} />
+            <span>
+              {t("routing.setByProfile")} ({activeProfile.name}): {t("routing.otherGoes")}{" "}
+              {activeProfile.global_proxy ? t("routing.viaProxy") : t("routing.viaDirect")}
+            </span>
+          </div>
+        )}
+        <div
+          className={`vpn-mode-group${activeProfile ? " routing-locked" : ""}`}
+          aria-disabled={!!activeProfile}
+        >
           <label
-            className={`vpn-mode-card ${state.defaultRoute === "proxy" ? "active" : ""}`}
+            className={`vpn-mode-card ${effectiveRoute === "proxy" ? "active" : ""}`}
             onClick={() => setDefaultRoute("proxy")}
           >
             <input
               type="radio"
               name="defaultRoute"
-              checked={state.defaultRoute === "proxy"}
+              checked={effectiveRoute === "proxy"}
+              disabled={!!activeProfile}
               onChange={() => setDefaultRoute("proxy")}
             />
             <div className="vpn-mode-info">
@@ -193,13 +221,14 @@ export function RoutingPage() {
             </div>
           </label>
           <label
-            className={`vpn-mode-card ${state.defaultRoute === "direct" ? "active" : ""}`}
+            className={`vpn-mode-card ${effectiveRoute === "direct" ? "active" : ""}`}
             onClick={() => setDefaultRoute("direct")}
           >
             <input
               type="radio"
               name="defaultRoute"
-              checked={state.defaultRoute === "direct"}
+              checked={effectiveRoute === "direct"}
+              disabled={!!activeProfile}
               onChange={() => setDefaultRoute("direct")}
             />
             <div className="vpn-mode-info">
@@ -213,6 +242,7 @@ export function RoutingPage() {
       {/* Add rule form */}
       <div className="settings-section">
         <div className="settings-label">{t("routing.addRule")}</div>
+        <div className="routing-hint">{t("routing.customOverride")}</div>
         <div className="routing-add-form">
           <input
             className="form-input routing-domain-input"
@@ -221,6 +251,9 @@ export function RoutingPage() {
             value={newDomain}
             onChange={(e) => setNewDomain(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addRule()}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
           />
           <select
             className="sort-select routing-action-select"
@@ -235,6 +268,7 @@ export function RoutingPage() {
             {t("common.add")}
           </button>
         </div>
+        <div className="routing-syntax-hint">{t("routing.syntaxHint")}</div>
       </div>
 
       {/* Presets */}
@@ -256,7 +290,7 @@ export function RoutingPage() {
       {/* Rules list */}
       <div className="settings-section">
         <div className="settings-label">
-          {t("routing.rules")} ({state.routingRules.length})
+          {t("routing.customRules")} ({state.routingRules.length})
         </div>
         {state.routingRules.length === 0 ? (
           <div className="empty-list">{t("routing.noRules")}</div>

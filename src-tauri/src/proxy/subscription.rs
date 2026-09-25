@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use super::link_parser;
 use super::models::*;
+use super::routing::{self, HappDirective};
 use crate::system::hwid;
 
 /// Decoded metadata from subscription response headers
@@ -128,8 +129,51 @@ fn extract_header_meta(headers: &reqwest::header::HeaderMap) -> SubHeaderMeta {
     }
 }
 
+/// Routing profile delivered with a subscription. Sources, in priority order: the
+/// `routing` header, a `happ://routing/...` line in the body, the `routing` block of a
+/// happ-style JSON config. `routing-enable: false` imports without activating.
+fn extract_routing(headers: &reqwest::header::HeaderMap, content: &str, sub_name: &str) -> Option<HappDirective> {
+    let from_header = headers
+        .get("routing")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| match routing::parse_happ_routing(v) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                log::warn!("Ignoring subscription routing header: {}", e);
+                None
+            }
+        });
+    let from_body = || {
+        link_parser::decode_subscription_content(content)
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("happ://routing/"))
+            .find_map(|l| routing::parse_happ_routing(l).ok())
+    };
+    let from_json = || {
+        let trimmed = content.trim();
+        if !trimmed.starts_with('[') {
+            return None;
+        }
+        let items: Vec<serde_json::Value> = serde_json::from_str(trimmed).ok()?;
+        let block = items.iter().find_map(|i| i.get("routing"))?;
+        routing::profile_from_xray_routing(block, sub_name).map(HappDirective::OnAdd)
+    };
+    let directive = from_header.or_else(from_body).or_else(from_json)?;
+
+    let enabled = headers
+        .get("routing-enable")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "0" | "no"))
+        .unwrap_or(true);
+    Some(match directive {
+        HappDirective::OnAdd(p) if !enabled => HappDirective::Add(p),
+        d => d,
+    })
+}
+
 /// Fetch a subscription URL and parse its contents into servers
-pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool, happ_ua: bool, app_logs: Option<Arc<tokio::sync::Mutex<Vec<String>>>>) -> Result<(Subscription, Vec<Server>)> {
+pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: bool, happ_ua: bool, app_logs: Option<Arc<tokio::sync::Mutex<Vec<String>>>>) -> Result<(Subscription, Vec<Server>, Option<HappDirective>)> {
     // Some providers gate by UA and only serve known clients; toggle Happ prefix
     // lets the user enable/disable impersonation from settings.
     let ua = if happ_ua {
@@ -157,6 +201,7 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
 
     // Extract all metadata from headers before consuming the response body
     let meta = extract_header_meta(resp.headers());
+    let headers = resp.headers().clone();
     let content = resp.text().await?;
 
     // Log each link parse result to app logs
@@ -228,12 +273,19 @@ pub async fn fetch_subscription(url: &str, name: Option<&str>, hwid_enabled: boo
         refill_date: meta.refill_date,
     };
 
+    let routing = extract_routing(&headers, &content, &subscription.name);
+
     log::info!(
-        "Fetched subscription '{}': {} servers, update_interval={}h",
+        "Fetched subscription '{}': {} servers, update_interval={}h, routing={}",
         subscription.name,
         servers.len(),
         subscription.update_interval.unwrap_or(0),
+        match &routing {
+            Some(HappDirective::Add(p)) | Some(HappDirective::OnAdd(p)) => p.name.as_str(),
+            Some(HappDirective::Off) => "off",
+            None => "none",
+        },
     );
 
-    Ok((subscription, servers))
+    Ok((subscription, servers, routing))
 }

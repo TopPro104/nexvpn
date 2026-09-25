@@ -9,8 +9,9 @@ use tokio::sync::Mutex;
 use std::os::unix::fs::PermissionsExt;
 
 use crate::proxy::models::*;
+use crate::proxy::routing::{self as routing_mod, EffectiveRouting, GeoResolution, RoutingInput};
 
-use super::{singbox, xray};
+use super::{geo, singbox, xray};
 
 pub struct CoreManager {
     process: Arc<Mutex<Option<Child>>>,
@@ -176,7 +177,7 @@ impl CoreManager {
     }
 
     #[allow(unused_variables)]
-    pub async fn start(&self, server: &Server, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str, per_app_mode: &str, per_app_list: &[String], stealth_mode: bool) -> Result<()> {
+    pub async fn start(&self, server: &Server, tun_mode: bool, routing_input: &RoutingInput, per_app_mode: &str, per_app_list: &[String], stealth_mode: bool) -> Result<()> {
         self.stop().await?;
 
         let core_type = self.core_type.lock().await.clone();
@@ -204,9 +205,18 @@ impl CoreManager {
         let auth = (self.proxy_auth_user.as_str(), self.proxy_auth_pass.as_str());
         let clash_secret = self.clash_api_secret.as_str();
 
+        let mut routing = EffectiveRouting::build(&routing_input.rules, &routing_input.default_route, routing_input.profile.as_ref());
+        if routing.needs_geo() {
+            let dir = routing_mod::geo_dir(&self.geo_root(), routing_input.profile.as_ref());
+            // sing-box can't read .dat files: convert the used categories to rule-sets.
+            // The Xray TUN bridge also needs them for its DNS rules.
+            let want_rule_sets = core_type == CoreType::SingBox || needs_xray_bridge;
+            routing.geo = prepare_geo(dir, &routing, want_rule_sets).await;
+        }
+
         let config = match core_type {
-            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, routing_rules, default_route, auth, clash_secret, self.clash_api_port)?,
-            CoreType::Xray => xray::generate_config(server, socks_port, http_port, routing_rules, default_route, auth, self.xray_api_port)?,
+            CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, &routing, auth, clash_secret, self.clash_api_port)?,
+            CoreType::Xray => xray::generate_config(server, socks_port, http_port, &routing, auth, self.xray_api_port)?,
         };
 
         let config_path = self.config_dir.join("running_config.json");
@@ -287,8 +297,12 @@ impl CoreManager {
         self.logs.lock().await.clear();
 
         let mut child = match core_type {
-            CoreType::SingBox => spawn_hidden(&bin_path, &["run", "-c", config_path.to_str().unwrap()])?,
-            CoreType::Xray => spawn_hidden(&bin_path, &["-config", config_path.to_str().unwrap()])?,
+            CoreType::SingBox => spawn_hidden(&bin_path, &["run", "-c", config_path.to_str().unwrap()], &[])?,
+            // Xray looks up geosite.dat / geoip.dat in its asset dir
+            CoreType::Xray => {
+                let env: Vec<(&str, &std::path::Path)> = routing.geo.dir.iter().map(|d| ("XRAY_LOCATION_ASSET", d.as_path())).collect();
+                spawn_hidden(&bin_path, &["-config", config_path.to_str().unwrap()], &env)?
+            }
         };
 
         // Capture stdout/stderr into log buffer
@@ -332,7 +346,7 @@ impl CoreManager {
 
                 #[cfg(not(target_os = "android"))]
                 if needs_xray_bridge {
-                    self.start_xray_tun_bridge(socks_port, &server.address).await?;
+                    self.start_xray_tun_bridge(socks_port, &server.address, &bin_path, &routing).await?;
                 }
                 #[cfg(target_os = "android")]
                 let _ = needs_xray_bridge;
@@ -372,6 +386,11 @@ impl CoreManager {
         }
         let _ = std::fs::remove_file(self.pid_file());
         Ok(())
+    }
+
+    /// Root folder for downloaded geo files (one subfolder per routing profile)
+    pub fn geo_root(&self) -> PathBuf {
+        self.config_dir.join("geo")
     }
 
     // ── Orphaned core cleanup ──────────────────────────
@@ -491,7 +510,7 @@ impl CoreManager {
     /// Spawn sing-box as a TUN→SOCKS bridge in front of Xray.
     /// Called only after Xray's SOCKS inbound is confirmed reachable.
     #[cfg(not(target_os = "android"))]
-    async fn start_xray_tun_bridge(&self, xray_socks_port: u16, server_address: &str) -> Result<()> {
+    async fn start_xray_tun_bridge(&self, xray_socks_port: u16, server_address: &str, xray_bin: &std::path::Path, routing: &EffectiveRouting) -> Result<()> {
         // Windows: remove stale Wintun device so sing-box can create a fresh one.
         // Without this, a crashed previous run leaves a zombie adapter that blocks startup.
         #[cfg(target_os = "windows")]
@@ -500,14 +519,15 @@ impl CoreManager {
         let bridge_bin = self.resolve_binary(&CoreType::SingBox).await
             .map_err(|e| anyhow!("TUN mode with Xray requires sing-box binary alongside the app: {}", e))?;
 
-        let config = super::singbox::generate_bridge_config(xray_socks_port, server_address);
+        let xray_process = xray_bin.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "xray".to_string());
+        let config = super::singbox::generate_bridge_config(xray_socks_port, server_address, &xray_process, routing);
         let config_path = self.config_dir.join("running_bridge.json");
         std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)
             .map_err(|e| anyhow!("Cannot write bridge config: {}", e))?;
 
         log::info!("Starting sing-box TUN bridge → SOCKS 127.0.0.1:{}", xray_socks_port);
 
-        let mut child = spawn_hidden(&bridge_bin, &["run", "-c", config_path.to_str().unwrap()])?;
+        let mut child = spawn_hidden(&bridge_bin, &["run", "-c", config_path.to_str().unwrap()], &[])?;
         self.spawn_log_reader(child.stdout.take(), "BRIDGE-OUT");
         self.spawn_log_reader(child.stderr.take(), "BRIDGE-ERR");
         self.record_pid(&child);
@@ -833,6 +853,70 @@ impl CoreManager {
     }
 }
 
+/// Read which geo codes exist and (for sing-box) convert the used ones to rule-sets.
+/// Never fails: rules whose data is unavailable are dropped with a warning, so a missing
+/// or broken geo file degrades routing instead of preventing the connection.
+async fn prepare_geo(dir: PathBuf, routing: &EffectiveRouting, want_rule_sets: bool) -> GeoResolution {
+    let site_codes_wanted = routing.geosite_codes();
+    let ip_codes_wanted = routing.geoip_codes();
+    let result = tokio::task::spawn_blocking(move || -> Result<GeoResolution> {
+        let site_dat = dir.join("geosite.dat");
+        let ip_dat = dir.join("geoip.dat");
+        let mut res = GeoResolution { dir: Some(dir.clone()), ..Default::default() };
+        if !site_codes_wanted.is_empty() && site_dat.exists() {
+            res.site_codes = geo::list_codes(&site_dat)?;
+        }
+        if !ip_codes_wanted.is_empty() && ip_dat.exists() {
+            res.ip_codes = geo::list_codes(&ip_dat)?;
+        }
+        let sites: Vec<String> = site_codes_wanted.into_iter().filter(|c| res.has_site(c)).collect();
+        let ips: Vec<String> = ip_codes_wanted.into_iter().filter(|c| res.has_ip(c)).collect();
+        if want_rule_sets && (!sites.is_empty() || !ips.is_empty()) {
+            let built = geo::build_singbox_rule_sets(
+                (!sites.is_empty()).then_some(site_dat.as_path()),
+                (!ips.is_empty()).then_some(ip_dat.as_path()),
+                &sites,
+                &ips,
+                &dir.join("rule-sets"),
+            )?;
+            let keyed = sites
+                .iter()
+                .map(|c| (format!("geosite:{}", c), geo::geosite_tag(c)))
+                .chain(ips.iter().map(|c| (format!("geoip:{}", c), geo::geoip_tag(c))));
+            for (key, tag) in keyed {
+                if let Some((_, path)) = built.iter().find(|(t, _)| *t == tag) {
+                    res.rule_sets.push((key, tag, path.clone()));
+                }
+            }
+        }
+        Ok(res)
+    })
+    .await;
+
+    let res = match result {
+        Ok(Ok(res)) => res,
+        Ok(Err(e)) => {
+            log::warn!("Geo data unavailable, geosite/geoip rules skipped: {}", e);
+            GeoResolution::default()
+        }
+        Err(e) => {
+            log::warn!("Geo preparation panicked: {}", e);
+            GeoResolution::default()
+        }
+    };
+    let missing: Vec<String> = routing
+        .geosite_codes()
+        .into_iter()
+        .filter(|c| !res.has_site(c))
+        .map(|c| format!("geosite:{}", c))
+        .chain(routing.geoip_codes().into_iter().filter(|c| !res.has_ip(c)).map(|c| format!("geoip:{}", c)))
+        .collect();
+    if !missing.is_empty() {
+        log::warn!("Routing entries skipped (not in geo files or files not downloaded): {}", missing.join(", "));
+    }
+    res
+}
+
 /// True if something already accepts connections on 127.0.0.1:port.
 /// A live listener answers in well under the timeout; the cap matters on Windows,
 /// where a refused localhost connect takes ~2s of SYN retries.
@@ -899,8 +983,11 @@ fn kill_process(pid: u32) -> bool {
 
 /// Spawn a process with hidden console window on Windows
 #[allow(unused_imports)]
-fn spawn_hidden(bin: &PathBuf, args: &[&str]) -> Result<Child> {
+fn spawn_hidden(bin: &PathBuf, args: &[&str], env: &[(&str, &std::path::Path)]) -> Result<Child> {
     let mut cmd = tokio::process::Command::new(bin);
+    for (key, val) in env {
+        cmd.env(key, val);
+    }
     cmd.args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -915,4 +1002,42 @@ fn spawn_hidden(bin: &PathBuf, args: &[&str]) -> Result<Child> {
     }
 
     Ok(cmd.spawn()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::routing::{parse_happ_routing, HappDirective};
+
+    /// Writes real configs for manual checks with the actual cores:
+    /// NEXVPN_E2E_GEO=<dir with geosite.dat/geoip.dat> NEXVPN_E2E_OUT=<dir>
+    /// NEXVPN_E2E_PROFILE=<happ link> cargo test --lib write_e2e_configs -- --ignored
+    #[tokio::test]
+    #[ignore]
+    async fn write_e2e_configs() {
+        let geo_dir = PathBuf::from(std::env::var("NEXVPN_E2E_GEO").unwrap());
+        let out = PathBuf::from(std::env::var("NEXVPN_E2E_OUT").unwrap());
+        let link = std::env::var("NEXVPN_E2E_PROFILE").unwrap();
+        let (HappDirective::OnAdd(mut profile) | HappDirective::Add(mut profile)) = parse_happ_routing(&link).unwrap() else { panic!() };
+        profile.id = "e2e".into();
+        let server = crate::proxy::link_parser::parse_link(
+            "vless://00000000-0000-0000-0000-000000000000@203.0.113.10:443?security=reality&pbk=Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw&sid=ab&sni=www.example.com&fp=chrome&type=tcp&flow=xtls-rprx-vision#e2e",
+        ).unwrap();
+        let custom = vec![
+            RoutingRule { id: "1".into(), domain: "example.org".into(), action: RuleAction::Direct, enabled: true },
+            RoutingRule { id: "2".into(), domain: "geosite:youtube".into(), action: RuleAction::Block, enabled: false },
+        ];
+        let mut routing = EffectiveRouting::build(&custom, "proxy", Some(&profile));
+        routing.geo = prepare_geo(geo_dir, &routing, true).await;
+        std::fs::create_dir_all(&out).unwrap();
+        let write = |name: &str, v: &serde_json::Value| std::fs::write(out.join(name), serde_json::to_string_pretty(v).unwrap()).unwrap();
+        let auth = ("u", "p");
+        write("singbox-proxy.json", &singbox::generate_config(&server, 21080, 21081, false, &routing, auth, "s", 21090).unwrap());
+        write("singbox-tun.json", &singbox::generate_config(&server, 21080, 21081, true, &routing, auth, "s", 21090).unwrap());
+        write("xray.json", &xray::generate_config(&server, 21080, 21081, &routing, auth, 21091).unwrap());
+        write("bridge.json", &singbox::generate_bridge_config(21080, &server.address, "xray", &routing));
+        let no_profile = EffectiveRouting::build(&custom, "direct", None);
+        write("singbox-noprofile.json", &singbox::generate_config(&server, 21080, 21081, false, &no_profile, auth, "s", 21090).unwrap());
+        write("xray-noprofile.json", &xray::generate_config(&server, 21080, 21081, &no_profile, auth, 21091).unwrap());
+    }
 }

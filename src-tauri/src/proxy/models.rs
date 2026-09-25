@@ -225,6 +225,48 @@ pub struct RoutingRule {
     pub enabled: bool,
 }
 
+/// Happ-compatible routing profile (https://routing.happ.su). Entries in the site/ip
+/// lists use Xray syntax: "geosite:x", "geoip:x", "domain:", "full:", "keyword:",
+/// "regexp:", plain strings (keyword match, as in Xray), IPs and CIDRs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct RoutingProfile {
+    pub id: String,
+    pub name: String,
+    /// Traffic that matches no rule goes via proxy (true) or direct (false)
+    pub global_proxy: bool,
+    /// Rule priority between the lists, e.g. "block-proxy-direct"
+    pub route_order: String,
+    /// Resolver used for proxied domains, queried through the proxy ("DoH" | "DoU")
+    pub remote_dns_type: String,
+    pub remote_dns_domain: String,
+    pub remote_dns_ip: String,
+    /// Resolver used for direct domains, queried directly ("DoH" | "DoU")
+    pub domestic_dns_type: String,
+    pub domestic_dns_domain: String,
+    pub domestic_dns_ip: String,
+    pub geoip_url: String,
+    pub geosite_url: String,
+    /// Unix seconds as a string; a higher value forces a geo file re-download
+    pub last_updated: String,
+    pub dns_hosts: std::collections::BTreeMap<String, String>,
+    pub direct_sites: Vec<String>,
+    pub direct_ip: Vec<String>,
+    pub proxy_sites: Vec<String>,
+    pub proxy_ip: Vec<String>,
+    pub block_sites: Vec<String>,
+    pub block_ip: Vec<String>,
+    /// "AsIs" | "IPIfNonMatch" | "IPOnDemand"
+    pub domain_strategy: String,
+    /// Set when the profile was delivered by a subscription (deleted together with it)
+    pub subscription_id: Option<String>,
+    /// Unix seconds of the last successful geo file download
+    pub geo_updated_at: Option<u64>,
+    /// `last_updated` value the current geo files were downloaded for
+    pub geo_last_updated: String,
+    pub geo_error: Option<String>,
+}
+
 /// A recorded connection session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionRecord {
@@ -256,6 +298,11 @@ pub struct AppState {
     pub default_route: String,
     #[serde(default)]
     pub onboarding_completed: bool,
+    #[serde(default)]
+    pub routing_profiles: Vec<RoutingProfile>,
+    /// Active routing profile; None = only custom rules + default route
+    #[serde(default)]
+    pub active_routing_profile: Option<String>,
 }
 
 fn default_route() -> String { "proxy".to_string() }

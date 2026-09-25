@@ -12,6 +12,7 @@ import { SettingsPage } from "./components/settings/SettingsPage";
 import { LogsPage } from "./components/logs/LogsPage";
 import { StatsPage } from "./components/stats/StatsPage";
 import { RoutingPage } from "./components/routing/RoutingPage";
+import { runRoutingImport } from "./components/routing/RoutingProfiles";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { ToastStack } from "./components/ui/Toast";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
@@ -102,6 +103,8 @@ function AppContent() {
           ]);
           dispatch({ type: "SET_SERVERS", servers });
           dispatch({ type: "SET_SUBSCRIPTIONS", subs });
+          // The subscription may have delivered or updated a routing profile
+          dispatch({ type: "BUMP_ROUTING_PROFILES" });
           toast(`${t("toast.subAutoUpdated")}: ${sub.name}`, "info");
         } catch {
           // Silent fail — will retry next interval
@@ -120,13 +123,28 @@ function AppContent() {
     };
   }, [state.subscriptions, dispatch, toast]);
 
-  // Deep link handler: nexvpn://import/SUBSCRIPTION_URL
-  const processedUrls = useRef(new Set<string>());
+  // Deep link handler:
+  //   nexvpn://import/SUBSCRIPTION_URL
+  //   nexvpn://routing/... and happ://routing/... (add | onadd | off routing profile)
+  const processedUrls = useRef(new Map<string, number>());
 
   const handleDeepLink = useCallback(async (raw: string) => {
-    // Deduplicate
-    if (processedUrls.current.has(raw)) return;
-    processedUrls.current.add(raw);
+    const isRouting = /^(nexvpn|happ):\/\/routing\//i.test(raw);
+
+    // Deduplicate: the same URL can arrive from several sources at once (launch URL,
+    // deep-link plugin, single-instance forward). Import links are handled once per
+    // session; routing links (e.g. ".../off") may legitimately be opened again later.
+    const seenAt = processedUrls.current.get(raw);
+    if (seenAt !== undefined && (!isRouting || Date.now() - seenAt < 5000)) return;
+    processedUrls.current.set(raw, Date.now());
+
+    if (isRouting) {
+      dispatch({ type: "SET_ROUTING_TAB", tab: "rules" });
+      dispatch({ type: "SET_PAGE", page: "routing" });
+      toast(t("routing.importing"), "info");
+      await runRoutingImport(raw, dispatch, toast);
+      return;
+    }
 
     const match = raw.match(/^nexvpn:\/\/import\/(.+)$/i);
     if (!match) return;

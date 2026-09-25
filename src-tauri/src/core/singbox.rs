@@ -2,9 +2,10 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::proxy::models::*;
+use crate::proxy::routing::{DnsKind, DnsSpec, EffectiveRouting, Matcher, RouteAction};
 
 /// Generate a sing-box config for connecting to a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool, routing_rules: &[RoutingRule], default_route: &str, auth: (&str, &str), clash_secret: &str, clash_api_port: u16) -> Result<Value> {
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mode: bool, routing: &EffectiveRouting, auth: (&str, &str), clash_secret: &str, clash_api_port: u16) -> Result<Value> {
     let outbound = build_outbound(server)?;
     let (auth_user, auth_pass) = auth;
 
@@ -51,49 +52,73 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         }));
     }
 
-    // DNS config: TUN mode needs DoH + proper resolver chain to avoid loops
-    // sing-box 1.12+ new DNS format: use type/server instead of address
-    let dns = if tun_mode {
-        json!({
-            "servers": [
-                {
-                    "tag": "dns-remote",
-                    "type": "https",
-                    "server": "dns.google",
-                    "server_port": 443,
-                    "domain_resolver": "dns-direct",
-                    "detour": "proxy"
-                },
-                {
-                    "tag": "dns-direct",
-                    "type": "udp",
-                    "server": "8.8.8.8",
-                    "server_port": 53
-                }
-            ],
-            "rules": [
-                { "query_type": [28, 32, 33], "action": "reject" },
-                { "domain_suffix": [".lan"], "action": "reject" }
-            ],
-            "final": "dns-remote",
-            "independent_cache": true
-        })
+    // DNS. Without a profile: TUN needs DoH through the proxy + a direct resolver for
+    // bootstrapping; proxy mode only resolves for the direct outbound.
+    // With a profile: its remote resolver goes through the proxy, the domestic one direct.
+    // sing-box 1.12+ DNS format: type/server instead of address.
+    let (dns_servers, remote_tag, direct_tag) = if let Some(pdns) = &routing.dns {
+        let mut hosts = pdns.hosts.clone();
+        let mut servers = vec![
+            dns_server(&pdns.remote, "dns-remote", Some("proxy"), &mut hosts),
+            dns_server(&pdns.domestic, "dns-domestic", None, &mut hosts),
+        ];
+        if !hosts.is_empty() {
+            servers.push(json!({ "tag": "dns-hosts", "type": "hosts", "predefined": hosts }));
+        }
+        (servers, "dns-remote", "dns-domestic")
+    } else if tun_mode {
+        (vec![
+            json!({
+                "tag": "dns-remote",
+                "type": "https",
+                "server": "dns.google",
+                "server_port": 443,
+                "domain_resolver": "dns-direct",
+                "detour": "proxy"
+            }),
+            json!({
+                "tag": "dns-direct",
+                "type": "udp",
+                "server": "8.8.8.8",
+                "server_port": 53
+            }),
+        ], "dns-remote", "dns-direct")
     } else {
-        json!({
-            "servers": [
-                {
-                    "tag": "dns-local",
-                    "type": "local"
-                },
-                {
-                    "tag": "dns-remote",
-                    "type": "udp",
-                    "server": "8.8.8.8"
-                }
-            ],
-            "final": "dns-remote"
-        })
+        (vec![
+            json!({ "tag": "dns-local", "type": "local" }),
+            json!({ "tag": "dns-remote", "type": "udp", "server": "8.8.8.8" }),
+        ], "dns-remote", if cfg!(target_os = "android") { "dns-remote" } else { "dns-local" })
     };
+
+    let mut dns_rules: Vec<Value> = Vec::new();
+    if let Some(pdns) = &routing.dns {
+        if !pdns.hosts.is_empty() {
+            dns_rules.push(json!({ "domain": pdns.hosts.keys().collect::<Vec<_>>(), "server": "dns-hosts" }));
+        }
+    }
+    if tun_mode {
+        dns_rules.push(json!({ "query_type": [28, 32, 33], "action": "reject" }));
+        dns_rules.push(json!({ "domain_suffix": [".lan"], "action": "reject" }));
+    }
+    for group in &routing.groups {
+        for mut item in domain_items(&group.domains, routing) {
+            match group.action {
+                RouteAction::Block => item["action"] = json!("reject"),
+                RouteAction::Proxy => item["server"] = json!(remote_tag),
+                RouteAction::Direct => item["server"] = json!(direct_tag),
+            }
+            dns_rules.push(item);
+        }
+    }
+
+    let mut dns = json!({
+        "servers": dns_servers,
+        "rules": dns_rules,
+        "final": if routing.final_proxy { remote_tag } else { direct_tag }
+    });
+    if tun_mode {
+        dns["independent_cache"] = json!(true);
+    }
 
     // Route rules (sniff + DNS hijack, same approach as NekoRay)
     let mut route_rules: Vec<Value> = vec![
@@ -126,23 +151,35 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         }));
     }
 
-    // User-defined routing rules
-    for rule in routing_rules.iter().filter(|r| r.enabled) {
-        let domain = &rule.domain;
-        match rule.action {
-            RuleAction::Direct => {
-                route_rules.push(json!({ "domain_suffix": [domain], "outbound": "direct" }));
-            }
-            RuleAction::Block => {
-                route_rules.push(json!({ "domain_suffix": [domain], "action": "reject" }));
-            }
-            RuleAction::Proxy => {
-                route_rules.push(json!({ "domain_suffix": [domain], "outbound": "proxy" }));
-            }
+    // Custom rules, private ranges, then the profile lists (see EffectiveRouting::build)
+    let mut ip_rules: Vec<Value> = Vec::new();
+    for group in &routing.groups {
+        let domains = domain_items(&group.domains, routing);
+        let ips = ip_items(&group.ips, routing);
+        for mut item in domains.into_iter().chain(ips.iter().cloned()) {
+            set_route_action(&mut item, group.action);
+            route_rules.push(item);
+        }
+        for mut item in ips {
+            set_route_action(&mut item, group.action);
+            ip_rules.push(item);
         }
     }
+    // IPIfNonMatch: a domain that matched nothing is resolved and checked against the IP
+    // rules again (direct traffic keeps the domain for dialing; resolve only fills addresses).
+    if routing.resolve_ips && !ip_rules.is_empty() {
+        route_rules.push(json!({ "action": "resolve" }));
+        route_rules.extend(ip_rules);
+    }
 
-    let final_route = if default_route == "direct" { "direct" } else { "proxy" };
+    let rule_sets: Vec<Value> = routing
+        .geo
+        .rule_sets
+        .iter()
+        .map(|(_, tag, path)| json!({ "type": "local", "tag": tag, "format": "source", "path": path }))
+        .collect();
+
+    let final_route = if routing.final_proxy { "proxy" } else { "direct" };
 
     let config = json!({
         "log": {
@@ -160,11 +197,10 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         ],
         "route": {
             "rules": route_rules,
+            "rule_set": rule_sets,
             "final": final_route,
             "auto_detect_interface": !cfg!(target_os = "android"),
-            "default_domain_resolver": {
-                "server": if cfg!(target_os = "android") { "dns-remote" } else if tun_mode { "dns-direct" } else { "dns-local" }
-            }
+            "default_domain_resolver": { "server": direct_tag }
         },
         "experimental": {
             "clash_api": {
@@ -180,7 +216,7 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
 /// Generate a minimal sing-box bridge config: TUN inbound → SOCKS outbound to Xray.
 /// Used when user selects Xray core + TUN mode on desktop (Xray has no native TUN).
 /// Pattern: v2rayN / nekoray — Xray handles the protocol, sing-box handles TUN.
-pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Value {
+pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str, xray_process: &str, routing: &EffectiveRouting) -> Value {
     // Is server.address an IP literal or a hostname?
     let server_is_ip = server_address.parse::<std::net::IpAddr>().is_ok();
     let bypass_domain: Vec<String> = if !server_is_ip { vec![server_address.to_string()] } else { vec![] };
@@ -216,13 +252,39 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Val
 
     // Without bypassing the VPN server address, Xray's outbound connection to the real
     // server hits the TUN → loops back into Xray forever. v2rayN calls this ProtectDomainList.
-    let mut dns_rules: Vec<Value> = vec![];
+    // Xray's own sockets (its direct outbound, DNS lookups, the connection to the server)
+    // must bypass the TUN too, or "direct" traffic loops TUN → Xray → TUN forever.
+    let mut dns_rules: Vec<Value> = vec![
+        json!({ "process_name": [xray_process], "server": "local" }),
+    ];
     if !bypass_domain.is_empty() {
         dns_rules.push(json!({ "domain": bypass_domain.clone(), "server": "local" }));
     }
+    // Domains the routing sends direct should get answers from a direct resolver
+    for group in routing.groups.iter().filter(|g| g.action == RouteAction::Direct) {
+        for mut item in domain_items(&group.domains, routing) {
+            item["server"] = json!("local");
+            dns_rules.push(item);
+        }
+    }
+    let rule_sets: Vec<Value> = routing
+        .geo
+        .rule_sets
+        .iter()
+        .filter(|(key, _, _)| key.starts_with("geosite:"))
+        .map(|(_, tag, path)| json!({ "type": "local", "tag": tag, "format": "source", "path": path }))
+        .collect();
+    let local_dns = routing
+        .dns
+        .as_ref()
+        .map(|d| d.domestic.ip.clone())
+        .filter(|ip| ip.parse::<std::net::IpAddr>().is_ok())
+        .unwrap_or_else(|| "223.5.5.5".to_string());
+
     let mut route_rules: Vec<Value> = vec![
         json!({ "action": "sniff" }),
         json!({ "protocol": "dns", "action": "hijack-dns" }),
+        json!({ "process_name": [xray_process], "outbound": "direct" }),
     ];
     if !bypass_domain.is_empty() {
         route_rules.push(json!({ "domain": bypass_domain.clone(), "outbound": "direct" }));
@@ -240,7 +302,7 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Val
         "dns": {
             "servers": [
                 { "tag": "remote", "type": "tcp", "server": "8.8.8.8", "detour": "to-xray" },
-                { "tag": "local", "type": "udp", "server": "223.5.5.5" }
+                { "tag": "local", "type": "udp", "server": local_dns }
             ],
             "rules": dns_rules,
             "final": "remote",
@@ -269,11 +331,105 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str) -> Val
         ],
         "route": {
             "rules": route_rules,
+            "rule_set": rule_sets,
             "final": "to-xray",
             "auto_detect_interface": true,
             "default_domain_resolver": { "server": "local" }
         }
     })
+}
+
+/// A profile DNS server. DoH hostnames are pinned to the profile's IP through the hosts
+/// server, so resolving the resolver never depends on another resolver.
+fn dns_server(spec: &DnsSpec, tag: &str, detour: Option<&str>, hosts: &mut std::collections::BTreeMap<String, String>) -> Value {
+    let mut v = match (&spec.kind, spec.doh_parts()) {
+        (DnsKind::DoH, Some((host, port, path))) => {
+            let mut v = json!({ "tag": tag, "type": "https", "server": host, "server_port": port, "path": path });
+            if host.parse::<std::net::IpAddr>().is_err() {
+                if !spec.ip.is_empty() {
+                    hosts.entry(host.to_lowercase()).or_insert_with(|| spec.ip.clone());
+                    v["domain_resolver"] = json!("dns-hosts");
+                } else {
+                    v["domain_resolver"] = json!("dns-domestic");
+                }
+            }
+            v
+        }
+        // Through the proxy use TCP: a failed lookup aborts the connection in sing-box's
+        // resolve action, and TCP doesn't depend on the server relaying UDP
+        _ if detour.is_some() => json!({ "tag": tag, "type": "tcp", "server": spec.ip, "server_port": 53 }),
+        _ => json!({ "tag": tag, "type": "udp", "server": spec.ip, "server_port": 53 }),
+    };
+    if let Some(d) = detour {
+        v["detour"] = json!(d);
+    }
+    v
+}
+
+/// Rule items for domain matchers: one item for literal domains, one for geosite rule-sets.
+/// Kept as separate rules so sing-box never ANDs them together.
+fn domain_items(matchers: &[Matcher], routing: &EffectiveRouting) -> Vec<Value> {
+    let (mut full, mut suffix, mut keyword, mut regex, mut sets) = (vec![], vec![], vec![], vec![], vec![]);
+    for m in matchers {
+        match m {
+            Matcher::Full(d) => full.push(d.clone()),
+            Matcher::Suffix(d) => suffix.push(d.clone()),
+            Matcher::Keyword(d) => keyword.push(d.clone()),
+            Matcher::Regex(d) => regex.push(d.clone()),
+            Matcher::GeoSite(_) => {
+                if let Some(tag) = routing.geo.rule_set_tag(m) {
+                    sets.push(tag.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut items = Vec::new();
+    let mut literal = json!({});
+    for (key, list) in [("domain", full), ("domain_suffix", suffix), ("domain_keyword", keyword), ("domain_regex", regex)] {
+        if !list.is_empty() {
+            literal[key] = json!(list);
+        }
+    }
+    if literal.as_object().map_or(false, |o| !o.is_empty()) {
+        items.push(literal);
+    }
+    if !sets.is_empty() {
+        items.push(json!({ "rule_set": sets }));
+    }
+    items
+}
+
+fn ip_items(matchers: &[Matcher], routing: &EffectiveRouting) -> Vec<Value> {
+    let mut cidrs = vec![];
+    let mut sets = vec![];
+    for m in matchers {
+        match m {
+            Matcher::Cidr(c) => cidrs.push(c.clone()),
+            Matcher::GeoIp(_) => {
+                if let Some(tag) = routing.geo.rule_set_tag(m) {
+                    sets.push(tag.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut items = Vec::new();
+    if !cidrs.is_empty() {
+        items.push(json!({ "ip_cidr": cidrs }));
+    }
+    if !sets.is_empty() {
+        items.push(json!({ "rule_set": sets }));
+    }
+    items
+}
+
+fn set_route_action(item: &mut Value, action: RouteAction) {
+    match action {
+        RouteAction::Proxy => item["outbound"] = json!("proxy"),
+        RouteAction::Direct => item["outbound"] = json!("direct"),
+        RouteAction::Block => item["action"] = json!("reject"),
+    }
 }
 
 fn build_outbound(server: &Server) -> Result<Value> {
