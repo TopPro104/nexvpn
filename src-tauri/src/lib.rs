@@ -94,6 +94,13 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             app.state::<AppContext>().core.kill_orphaned_cores();
 
+            // Geo files moved from per-profile to per-URL folders; carry old downloads over
+            {
+                let ctx: tauri::State<AppContext> = app.state();
+                let state = tauri::async_runtime::block_on(ctx.state.lock());
+                commands::migrate_geo_dirs(&state, &ctx.core.geo_root());
+            }
+
             // Android: poll file-based deep link written by MainActivity
             #[cfg(target_os = "android")]
             {

@@ -731,13 +731,32 @@ fn push_matcher(g: &mut RouteGroup, m: Matcher) {
     }
 }
 
-/// Where a profile's geo files live: `<geo_root>/<profile id>`; custom rules without a
-/// profile use `<geo_root>/default` (Loyalsoldier files).
+/// Geo files live in `<geo_root>/<hash of the two URLs>`, so profiles with the same
+/// sources share one copy — including custom rules without a profile, which use the
+/// Loyalsoldier defaults.
 pub fn geo_dir(geo_root: &Path, profile: Option<&RoutingProfile>) -> PathBuf {
+    let (site, ip) = geo_urls_of(profile);
+    geo_root.join(format!("{:016x}", fnv1a(format!("{}|{}", site, ip).as_bytes())))
+}
+
+/// (geosite, geoip) download URLs for a profile or for custom rules (None)
+pub fn geo_urls_of(profile: Option<&RoutingProfile>) -> (&str, &str) {
+    match profile {
+        Some(p) => (p.geosite_url.as_str(), p.geoip_url.as_str()),
+        None => (DEFAULT_GEOSITE_URL, DEFAULT_GEOIP_URL),
+    }
+}
+
+/// Where geo files were kept before folders were shared by URL (one per profile)
+pub fn legacy_geo_dir(geo_root: &Path, profile: Option<&RoutingProfile>) -> PathBuf {
     match profile {
         Some(p) => geo_root.join(sanitize(&p.id)),
         None => geo_root.join("default"),
     }
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3))
 }
 
 fn sanitize(id: &str) -> String {
@@ -843,6 +862,19 @@ mod tests {
         ok.geoip_url = String::new();
         let ok = validate_profile(ok).unwrap();
         assert_eq!(ok.geoip_url, DEFAULT_GEOIP_URL);
+    }
+
+    #[test]
+    fn geo_dirs_are_shared_by_url() {
+        let root = Path::new("/geo");
+        let mut a = default_profile("A");
+        a.id = "a".into();
+        let mut b = default_profile("B");
+        b.id = "b".into();
+        assert_eq!(geo_dir(root, Some(&a)), geo_dir(root, Some(&b)));
+        assert_eq!(geo_dir(root, Some(&a)), geo_dir(root, None));
+        b.geosite_url = "https://example.com/geosite.dat".into();
+        assert_ne!(geo_dir(root, Some(&a)), geo_dir(root, Some(&b)));
     }
 
     #[test]

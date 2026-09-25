@@ -1023,17 +1023,53 @@ async fn download_geo(dir: &std::path::Path, geosite_url: &str, geoip_url: &str)
     Ok(())
 }
 
-fn record_geo_result(state: &mut AppState, profile: &RoutingProfile, result: &anyhow::Result<()>) {
-    if let Some(p) = state.routing_profiles.iter_mut().find(|p| p.id == profile.id) {
+/// Record a download into the folder of `urls`. Fresh files serve every profile that
+/// shares the folder; an error is pinned on the profile that asked for them.
+fn record_geo_result(state: &mut AppState, urls: (&str, &str), trigger: Option<&str>, result: &anyhow::Result<()>) {
+    for p in state.routing_profiles.iter_mut() {
+        let shares = (p.geosite_url.as_str(), p.geoip_url.as_str()) == urls;
         match result {
-            Ok(()) => {
+            Ok(()) if shares => {
                 p.geo_updated_at = Some(now_secs());
-                p.geo_last_updated = geo_source_key(profile);
+                p.geo_last_updated = geo_source_key(p);
                 p.geo_error = None;
             }
-            Err(e) => p.geo_error = Some(e.to_string()),
+            Err(e) if trigger == Some(p.id.as_str()) => p.geo_error = Some(e.to_string()),
+            _ => {}
         }
     }
+}
+
+/// Delete geo folders nothing uses anymore. The default folder (custom rules) stays.
+fn cleanup_geo_dirs(state: &AppState, geo_root: &std::path::Path) {
+    let keep: std::collections::HashSet<std::path::PathBuf> = state
+        .routing_profiles
+        .iter()
+        .map(|p| routing::geo_dir(geo_root, Some(p)))
+        .chain(std::iter::once(routing::geo_dir(geo_root, None)))
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(geo_root) {
+        for path in entries.flatten().map(|e| e.path()).filter(|p| p.is_dir() && !keep.contains(p)) {
+            log::info!("Removing unused geo files {}", path.display());
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
+/// Startup: move geo files from the old per-profile folders into the shared per-URL
+/// ones (no re-download), then drop what is left over.
+pub fn migrate_geo_dirs(state: &AppState, geo_root: &std::path::Path) {
+    let profiles = state.routing_profiles.iter().map(Some).chain(std::iter::once(None));
+    for p in profiles {
+        let (old, new) = (routing::legacy_geo_dir(geo_root, p), routing::geo_dir(geo_root, p));
+        if old.join("geosite.dat").exists() && !new.join("geosite.dat").exists() {
+            let _ = std::fs::remove_dir_all(&new);
+            if std::fs::rename(&old, &new).is_ok() {
+                log::info!("Moved geo files {} -> {}", old.display(), new.display());
+            }
+        }
+    }
+    cleanup_geo_dirs(state, geo_root);
 }
 
 /// Download geo files that the current routing needs but that are not on disk yet.
@@ -1051,10 +1087,8 @@ async fn ensure_geo_files(ctx: &AppContext, state: &mut AppState) {
     if let Err(e) = &result {
         log::warn!("Geo files download failed, geosite/geoip rules will be skipped: {}", e);
     }
-    if let Some(p) = &input.profile {
-        record_geo_result(state, p, &result);
-        save_state(state);
-    }
+    record_geo_result(state, (site.as_str(), ip.as_str()), input.profile.as_ref().map(|p| p.id.as_str()), &result);
+    save_state(state);
 }
 
 /// Refresh a profile's geo files in the background (subscription updates). The new files
@@ -1073,7 +1107,7 @@ fn spawn_geo_refresh(ctx: &AppContext, state: &AppState, profile_id: &str) {
             log::warn!("Geo files for routing profile '{}' failed to download: {}", profile.name, e);
         }
         let mut st = shared.lock().await;
-        record_geo_result(&mut st, &profile, &result);
+        record_geo_result(&mut st, (&profile.geosite_url, &profile.geoip_url), Some(&profile.id), &result);
         save_state(&st);
     });
 }
@@ -1152,8 +1186,8 @@ fn remove_subscription_profiles(ctx: &AppContext, state: &mut AppState, subscrip
         if state.active_routing_profile.as_deref() == Some(&p.id) {
             state.active_routing_profile = None;
         }
-        let _ = std::fs::remove_dir_all(routing::geo_dir(&geo_root, Some(&p)));
     }
+    cleanup_geo_dirs(state, &geo_root);
 }
 
 #[derive(Serialize)]
@@ -1204,9 +1238,11 @@ async fn store_profile_content(ctx: &AppContext, id: &str, content: RoutingProfi
 
     let mut state = ctx.state.lock().await;
     if let Some(r) = &result {
-        record_geo_result(&mut state, &profile, r);
+        record_geo_result(&mut state, (&profile.geosite_url, &profile.geoip_url), Some(&profile.id), r);
         save_state(&state);
     }
+    // Geo URLs may have changed: the previous folder may be unused now
+    cleanup_geo_dirs(&state, &ctx.core.geo_root());
     if state.active_routing_profile.as_deref() == Some(id) {
         reconnect_if_running(ctx, &state).await;
     }
@@ -1387,7 +1423,7 @@ pub async fn import_routing_profile(ctx: State<'_, AppContext>, input: String) -
 
     let mut state = ctx.state.lock().await;
     if let Some(r) = &result {
-        record_geo_result(&mut state, &profile, r);
+        record_geo_result(&mut state, (&profile.geosite_url, &profile.geoip_url), Some(&profile.id), r);
         save_state(&state);
     }
     let is_active = state.active_routing_profile.as_deref() == Some(profile.id.as_str());
@@ -1426,13 +1462,13 @@ pub async fn set_active_routing_profile(ctx: State<'_, AppContext>, id: Option<S
 pub async fn delete_routing_profile(ctx: State<'_, AppContext>, id: String) -> Result<(), String> {
     let mut state = ctx.state.lock().await;
     let pos = state.routing_profiles.iter().position(|p| p.id == id).ok_or("Routing profile not found")?;
-    let profile = state.routing_profiles.remove(pos);
+    state.routing_profiles.remove(pos);
     let was_active = state.active_routing_profile.as_deref() == Some(id.as_str());
     if was_active {
         state.active_routing_profile = None;
     }
     save_state(&state);
-    let _ = std::fs::remove_dir_all(routing::geo_dir(&ctx.core.geo_root(), Some(&profile)));
+    cleanup_geo_dirs(&state, &ctx.core.geo_root());
     if was_active {
         reconnect_if_running(&ctx, &state).await;
     }
@@ -1450,7 +1486,7 @@ pub async fn update_routing_geo(ctx: State<'_, AppContext>, id: String) -> Resul
     let result = download_geo(&dir, &profile.geosite_url, &profile.geoip_url).await;
 
     let mut state = ctx.state.lock().await;
-    record_geo_result(&mut state, &profile, &result);
+    record_geo_result(&mut state, (&profile.geosite_url, &profile.geoip_url), Some(&profile.id), &result);
     save_state(&state);
     result.map_err(|e| format!("Geo files download failed: {}", e))?;
     if state.active_routing_profile.as_deref() == Some(id.as_str()) {
@@ -2054,6 +2090,28 @@ mod routing_profile_tests {
     fn directive(proxy: &[&str]) -> HappDirective {
         let json = serde_json::json!({ "Name": "Prov", "ProxySites": proxy, "DirectSites": ["geosite:private"] });
         HappDirective::OnAdd(routing::profile_from_happ_json(&json).unwrap())
+    }
+
+    #[test]
+    fn migrates_per_profile_geo_folders_to_shared_ones() {
+        let root = std::env::temp_dir().join(format!("nexvpn-geo-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut p = routing::default_profile("P");
+        p.id = "p1".into();
+        let legacy = routing::legacy_geo_dir(&root, Some(&p));
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("geosite.dat"), b"site").unwrap();
+        std::fs::write(legacy.join("geoip.dat"), b"ip").unwrap();
+        std::fs::create_dir_all(root.join("stale-profile")).unwrap();
+
+        let state = AppState { routing_profiles: vec![p.clone()], ..Default::default() };
+        migrate_geo_dirs(&state, &root);
+
+        let shared = routing::geo_dir(&root, Some(&p));
+        assert_eq!(std::fs::read(shared.join("geosite.dat")).unwrap(), b"site");
+        assert!(!legacy.exists());
+        assert!(!root.join("stale-profile").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
