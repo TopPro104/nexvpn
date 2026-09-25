@@ -15,9 +15,11 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
         },
         "dns": build_xray_dns(routing),
         "stats": {},
-        "api": {
-            "tag": "api",
-            "services": ["StatsService"]
+        // Stats over plain HTTP (/debug/vars) instead of the gRPC API, so reading
+        // traffic doesn't spawn an `xray api` process on every poll
+        "metrics": {
+            "tag": "metrics",
+            "listen": format!("127.0.0.1:{}", api_port)
         },
         "policy": {
             "system": {
@@ -62,15 +64,6 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
                 "sniffing": {
                     "enabled": true,
                     "destOverride": ["http", "tls"]
-                }
-            },
-            {
-                "tag": "api-in",
-                "port": api_port,
-                "listen": "127.0.0.1",
-                "protocol": "dokodemo-door",
-                "settings": {
-                    "address": "127.0.0.1"
                 }
             }
         ],
@@ -251,6 +244,12 @@ fn build_outbound(server: &Server) -> Result<Value> {
             if let Some(sni) = &server.tls.server_name {
                 rs["serverName"] = json!(sni);
             }
+            if let Some(spx) = &reality.spider_x {
+                rs["spiderX"] = json!(spx);
+            }
+            if let Some(pqv) = &reality.mldsa65_verify {
+                rs["mldsa65Verify"] = json!(pqv);
+            }
             stream["realitySettings"] = rs;
         } else {
             stream["security"] = json!("tls");
@@ -296,13 +295,7 @@ fn xray_entry(m: &Matcher, routing: &EffectiveRouting) -> Option<String> {
 }
 
 fn build_xray_routing_rules(routing: &EffectiveRouting) -> Value {
-    let mut rules = vec![
-        json!({
-            "inboundTag": ["api-in"],
-            "outboundTag": "api",
-            "type": "field"
-        }),
-    ];
+    let mut rules: Vec<Value> = Vec::new();
 
     // Pin the profile's resolvers: remote through the proxy, domestic direct
     if let Some(dns) = &routing.dns {

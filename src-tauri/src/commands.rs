@@ -374,7 +374,22 @@ pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, St
         log::error!("Failed to stop core: {}", e);
     }
 
-    // Finalize last open session
+    close_last_session(&mut state, &traffic);
+
+    state.active_server_id = None;
+    save_state(&state);
+
+    Ok(StatusResponse {
+        connected: false,
+        server_name: None,
+        core_type: format!("{:?}", ctx.core.get_core_type().await),
+        socks_port: ctx.core.socks_port().await,
+        http_port: ctx.core.http_port().await,
+    })
+}
+
+/// Finalize the open connection record (disconnect, app exit, restart as admin).
+pub fn close_last_session(state: &mut AppState, traffic: &TrafficStats) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     if let Some(last) = state.sessions.last_mut() {
@@ -389,17 +404,6 @@ pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, St
     if slen > 50 {
         state.sessions.drain(0..slen - 50);
     }
-
-    state.active_server_id = None;
-    save_state(&state);
-
-    Ok(StatusResponse {
-        connected: false,
-        server_name: None,
-        core_type: format!("{:?}", ctx.core.get_core_type().await),
-        socks_port: ctx.core.socks_port().await,
-        http_port: ctx.core.http_port().await,
-    })
 }
 
 /// Get connection status
@@ -639,8 +643,13 @@ pub async fn delete_subscription(ctx: State<'_, AppContext>, subscription_id: St
     let mut state = ctx.state.lock().await;
     state.servers.retain(|s| s.subscription_id.as_deref() != Some(&subscription_id));
     state.subscriptions.retain(|s| s.id != subscription_id);
+    let had_active = state.active_routing_profile.is_some();
     remove_subscription_profiles(&ctx, &mut state, &subscription_id);
     save_state(&state);
+    // Its profile was in use: apply the routing without it right away
+    if had_active && state.active_routing_profile.is_none() {
+        reconnect_if_running(&ctx, &state).await;
+    }
     Ok(())
 }
 
@@ -1514,13 +1523,16 @@ pub async fn restart_as_admin(app_handle: tauri::AppHandle, ctx: State<'_, AppCo
     // Tear down before the elevated instance starts: a core left running keeps its
     // ports and TUN device and makes the new instance report a connection it doesn't own.
     {
-        let _state = ctx.state.lock().await;
+        let mut state = ctx.state.lock().await;
+        let traffic = ctx.core.get_traffic_stats().await;
         if let Err(e) = proxy_setter::unset_system_proxy() {
             log::error!("Failed to unset system proxy: {}", e);
         }
         if let Err(e) = ctx.core.stop().await {
             log::error!("Failed to stop core: {}", e);
         }
+        close_last_session(&mut state, &traffic);
+        save_state(&state);
     }
 
     #[cfg(target_os = "windows")]
@@ -2025,7 +2037,7 @@ pub fn load_state() -> AppState {
     }
 }
 
-fn save_state(state: &AppState) {
+pub fn save_state(state: &AppState) {
     let path = state_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();

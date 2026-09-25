@@ -653,52 +653,28 @@ impl CoreManager {
     }
 
     async fn get_xray_traffic(&self) -> Result<TrafficStats> {
-        // Xray stats API is gRPC — use the xray binary to query it
-        let bin = self.resolve_binary(&CoreType::Xray).await?;
+        // Xray's metrics endpoint (expvar JSON). no_proxy: the system proxy may be us.
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()?;
+        let data: serde_json::Value = client
+            .get(format!("http://127.0.0.1:{}/debug/vars", self.xray_api_port))
+            .send()
+            .await?
+            .json()
+            .await?;
 
-        let mut cmd = tokio::process::Command::new(&bin);
-        cmd.args(["api", "statsquery", &format!("--server=127.0.0.1:{}", self.xray_api_port)])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null());
-
-        #[cfg(target_os = "windows")]
-        {
-            #[allow(unused_imports)]
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let output = cmd.output().await?;
-
-        if !output.status.success() {
-            return Ok(TrafficStats::default());
-        }
-
-        let text = String::from_utf8_lossy(&output.stdout);
-        let data: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-
-        let mut upload = 0u64;
-        let mut download = 0u64;
-
-        if let Some(stats) = data["stat"].as_array() {
-            for stat in stats {
-                let name = stat["name"].as_str().unwrap_or("");
-                let value = stat["value"]
-                    .as_str()
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .or_else(|| stat["value"].as_u64())
-                    .unwrap_or(0);
-
-                if name.contains("uplink") {
-                    upload += value;
-                } else if name.contains("downlink") {
-                    download += value;
-                }
+        // Count what the local inbounds carried (like sing-box's totals); summing the
+        // outbounds too would count every byte twice.
+        let mut stats = TrafficStats::default();
+        if let Some(inbounds) = data["stats"]["inbound"].as_object() {
+            for counters in inbounds.values() {
+                stats.upload += counters["uplink"].as_u64().unwrap_or(0);
+                stats.download += counters["downlink"].as_u64().unwrap_or(0);
             }
         }
-
-        Ok(TrafficStats { upload, download })
+        Ok(stats)
     }
 
     // ── Binary resolution ──────────────────────────────

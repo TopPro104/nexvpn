@@ -213,7 +213,15 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             if let tauri::RunEvent::Exit = _event {
                 let ctx: tauri::State<AppContext> = _app.state();
-                let _ = tauri::async_runtime::block_on(ctx.core.stop());
+                tauri::async_runtime::block_on(async {
+                    let traffic = ctx.core.get_traffic_stats().await;
+                    let _ = ctx.core.stop().await;
+                    // Don't let a long-running command (e.g. a geo download) hold up the exit
+                    if let Ok(mut state) = ctx.state.try_lock() {
+                        commands::close_last_session(&mut state, &traffic);
+                        commands::save_state(&state);
+                    }
+                });
                 system::proxy_setter::ensure_proxy_disabled();
             }
         });

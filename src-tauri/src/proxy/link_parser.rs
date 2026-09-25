@@ -230,6 +230,8 @@ fn build_tls_from_stream(stream: Option<&serde_json::Value>) -> TlsSettings {
             public_key: r.get("password").or_else(|| r.get("publicKey"))
                 .and_then(|v| v.as_str()).unwrap_or("").to_string(),
             short_id: r.get("shortId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            spider_x: r.get("spiderX").and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(String::from),
+            mldsa65_verify: r.get("mldsa65Verify").and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(String::from),
         })
     } else { None };
 
@@ -261,7 +263,7 @@ fn parse_vless(link: &str) -> Result<Server> {
     let url = Url::parse(link)?;
 
     let uuid = url.username().to_string();
-    let host = url.host_str().ok_or(anyhow!("No host"))?.to_string();
+    let host = url_host(&url)?;
     let port = url.port().unwrap_or(443);
     let name = percent_decode(url.fragment().unwrap_or("VLESS Server"));
 
@@ -318,6 +320,8 @@ fn parse_vless(link: &str) -> Result<Server> {
         Some(RealitySettings {
             public_key: params.get("pbk").unwrap_or_default(),
             short_id: params.get("sid").unwrap_or_default(),
+            spider_x: params.get("spx").filter(|v| !v.is_empty()),
+            mldsa65_verify: params.get("pqv").filter(|v| !v.is_empty()),
         })
     } else {
         None
@@ -371,7 +375,7 @@ fn parse_vmess(link: &str) -> Result<Server> {
 
     let json: serde_json::Value = serde_json::from_slice(&decoded)?;
 
-    let host = json_str(&json, "add")?;
+    let host = json_str(&json, "add")?.trim_matches(|c| c == '[' || c == ']').to_string();
     let port = json["port"]
         .as_u64()
         .or_else(|| json["port"].as_str()?.parse().ok())
@@ -517,7 +521,7 @@ fn parse_trojan(link: &str) -> Result<Server> {
     let url = Url::parse(link)?;
 
     let password = url.username().to_string();
-    let host = url.host_str().ok_or(anyhow!("No host"))?.to_string();
+    let host = url_host(&url)?;
     let port = url.port().unwrap_or(443);
     let name = percent_decode(url.fragment().unwrap_or("Trojan Server"));
 
@@ -588,7 +592,7 @@ fn parse_hysteria2(link: &str) -> Result<Server> {
     let url = Url::parse(&normalized)?;
 
     let password = url.username().to_string();
-    let host = url.host_str().ok_or(anyhow!("No host"))?.to_string();
+    let host = url_host(&url)?;
     let port = url.port().unwrap_or(443);
     let name = percent_decode(url.fragment().unwrap_or("Hysteria2 Server"));
 
@@ -667,7 +671,8 @@ fn decode_b64(s: &str) -> Result<String> {
 fn parse_host_port(s: &str) -> Result<(String, u16)> {
     let s = s.trim();
     if let Some(idx) = s.rfind(':') {
-        let host = s[..idx].to_string();
+        // "[2001:db8::1]:443" → bare IPv6
+        let host = s[..idx].trim_start_matches('[').trim_end_matches(']').to_string();
         let port: u16 = s[idx + 1..].parse()?;
         Ok((host, port))
     } else {
@@ -726,6 +731,12 @@ pub fn server_to_link(server: &Server) -> String {
                     let r = server.tls.reality.as_ref().unwrap();
                     params.push(format!("pbk={}", r.public_key));
                     params.push(format!("sid={}", r.short_id));
+                    if let Some(spx) = &r.spider_x {
+                        params.push(format!("spx={}", percent_encode(spx)));
+                    }
+                    if let Some(pqv) = &r.mldsa65_verify {
+                        params.push(format!("pqv={}", pqv));
+                    }
                 } else {
                     params.push("security=tls".to_string());
                 }
@@ -747,7 +758,7 @@ pub fn server_to_link(server: &Server) -> String {
             }
 
             let name = percent_encode(&server.name);
-            format!("vless://{}@{}:{}?{}#{}", uuid, server.address, server.port, params.join("&"), name)
+            format!("vless://{}@{}:{}?{}#{}", uuid, host_for_link(&server.address), server.port, params.join("&"), name)
         }
         Protocol::Vmess => {
             let obj = serde_json::json!({
@@ -778,7 +789,7 @@ pub fn server_to_link(server: &Server) -> String {
             let password = server.password.as_deref().unwrap_or("");
             let user_info = general_purpose::STANDARD.encode(format!("{}:{}", method, password));
             let name = percent_encode(&server.name);
-            format!("ss://{}@{}:{}#{}", user_info, server.address, server.port, name)
+            format!("ss://{}@{}:{}#{}", user_info, host_for_link(&server.address), server.port, name)
         }
         Protocol::Trojan => {
             let password = server.password.as_deref().unwrap_or("");
@@ -788,19 +799,38 @@ pub fn server_to_link(server: &Server) -> String {
             }
             let name = percent_encode(&server.name);
             let query = if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) };
-            format!("trojan://{}@{}:{}{}#{}", password, server.address, server.port, query, name)
+            format!("trojan://{}@{}:{}{}#{}", password, host_for_link(&server.address), server.port, query, name)
         }
         Protocol::Hysteria2 => {
             let password = server.password.as_deref().unwrap_or("");
             let name = percent_encode(&server.name);
-            format!("hy2://{}@{}:{}#{}", password, server.address, server.port, name)
+            format!("hy2://{}@{}:{}#{}", password, host_for_link(&server.address), server.port, name)
         }
         Protocol::Tuic => {
             let uuid = server.uuid.as_deref().unwrap_or("");
             let password = server.password.as_deref().unwrap_or("");
             let name = percent_encode(&server.name);
-            format!("tuic://{}:{}@{}:{}#{}", uuid, password, server.address, server.port, name)
+            format!("tuic://{}:{}@{}:{}#{}", uuid, password, host_for_link(&server.address), server.port, name)
         }
+    }
+}
+
+/// Host without the brackets `Url::host_str` keeps around IPv6 literals: the cores
+/// expect a bare address ("2001:db8::1", not "[2001:db8::1]").
+fn url_host(url: &Url) -> Result<String> {
+    match url.host().ok_or(anyhow!("No host"))? {
+        url::Host::Ipv6(ip) => Ok(ip.to_string()),
+        url::Host::Ipv4(ip) => Ok(ip.to_string()),
+        url::Host::Domain(d) => Ok(d.to_string()),
+    }
+}
+
+/// Brackets for IPv6 literals in share links (`user@[2001:db8::1]:443`)
+fn host_for_link(address: &str) -> String {
+    if address.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{}]", address)
+    } else {
+        address.to_string()
     }
 }
 
@@ -829,6 +859,24 @@ mod tests {
         let server = parse_link(link).unwrap();
         assert_eq!(server.protocol, Protocol::Trojan);
         assert_eq!(server.password, Some("password123".to_string()));
+    }
+
+    #[test]
+    fn test_reality_spx_pqv_round_trip() {
+        let server = parse_link("vless://u@h.com:443?security=reality&pbk=K&sid=ab&spx=%2Fpath&pqv=PQ#r").unwrap();
+        let r = server.tls.reality.as_ref().unwrap();
+        assert_eq!(r.spider_x.as_deref(), Some("/path"));
+        assert_eq!(r.mldsa65_verify.as_deref(), Some("PQ"));
+        let again = parse_link(&server_to_link(&server)).unwrap();
+        assert_eq!(again.tls.reality.unwrap().spider_x.as_deref(), Some("/path"));
+    }
+
+    #[test]
+    fn test_ipv6_host_has_no_brackets() {
+        let server = parse_link("vless://u@[2001:db8::1]:443?security=tls&sni=a.com#v6").unwrap();
+        assert_eq!(server.address, "2001:db8::1");
+        let link = server_to_link(&server);
+        assert!(link.contains("@[2001:db8::1]:443"), "{}", link);
     }
 
     #[test]

@@ -41,6 +41,12 @@ pub struct TlsSettings {
 pub struct RealitySettings {
     pub public_key: String,
     pub short_id: String,
+    /// Crawler path used when the server isn't REALITY ("spx")
+    #[serde(default)]
+    pub spider_x: Option<String>,
+    /// ML-DSA-65 public key for post-quantum certificate verification ("pqv", Xray only)
+    #[serde(default)]
+    pub mldsa65_verify: Option<String>,
 }
 
 /// WebSocket settings
