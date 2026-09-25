@@ -149,6 +149,13 @@ fn parse_xray_config_item(item: &serde_json::Value) -> Option<Server> {
         _ => return None,
     };
 
+    let mut tls = build_tls_from_stream(stream);
+    // Hysteria2 runs over QUIC and needs h3. TCP transports must not default to it:
+    // a TLS server offering only h2/http1.1 rejects a ClientHello whose sole ALPN is h3.
+    if protocol == Protocol::Hysteria2 && tls.alpn.is_empty() {
+        tls.alpn = vec!["h3".to_string()];
+    }
+
     Some(Server {
         id: Uuid::new_v4().to_string(),
         name,
@@ -165,7 +172,7 @@ fn parse_xray_config_item(item: &serde_json::Value) -> Option<Server> {
         grpc,
         xhttp,
         httpupgrade,
-        tls: build_tls_from_stream(stream),
+        tls,
         subscription_id: None,
         latency_ms: None,
         favorite: false,
@@ -219,7 +226,9 @@ fn build_tls_from_stream(stream: Option<&serde_json::Value>) -> TlsSettings {
 
     let reality = if security == Some("reality") {
         rs.map(|r| RealitySettings {
-            public_key: r.get("publicKey").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            // Xray 25.x+ configs name the client key "password"; "publicKey" is the legacy alias.
+            public_key: r.get("password").or_else(|| r.get("publicKey"))
+                .and_then(|v| v.as_str()).unwrap_or("").to_string(),
             short_id: r.get("shortId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         })
     } else { None };
@@ -239,7 +248,7 @@ fn build_tls_from_stream(stream: Option<&serde_json::Value>) -> TlsSettings {
             .and_then(|t| t.get("alpn"))
             .and_then(|v| v.as_array())
             .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_else(|| vec!["h3".to_string()]),
+            .unwrap_or_default(),
         fingerprint,
         reality,
     }
@@ -820,5 +829,28 @@ mod tests {
         let server = parse_link(link).unwrap();
         assert_eq!(server.protocol, Protocol::Trojan);
         assert_eq!(server.password, Some("password123".to_string()));
+    }
+
+    #[test]
+    fn test_json_sub_reality_password_key() {
+        let sub = r#"[{"remarks":"R","outbounds":[{"tag":"proxy","protocol":"vless",
+            "settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"u","flow":"xtls-rprx-vision"}]}]},
+            "streamSettings":{"network":"tcp","security":"reality","realitySettings":{
+                "serverName":"www.example.com","fingerprint":"chrome",
+                "password":"K3y","shortId":"ab12"}}}]}]"#;
+        let servers = parse_subscription_content(sub);
+        let tls = &servers[0].tls;
+        assert_eq!(tls.reality.as_ref().unwrap().public_key, "K3y");
+        assert_eq!(tls.reality.as_ref().unwrap().short_id, "ab12");
+        assert!(tls.alpn.is_empty());
+    }
+
+    #[test]
+    fn test_json_sub_hysteria_defaults_h3() {
+        let sub = r#"[{"remarks":"H","outbounds":[{"tag":"proxy","protocol":"hysteria",
+            "settings":{"version":2,"address":"1.2.3.4","port":443},
+            "streamSettings":{"network":"hysteria","security":"tls","hysteriaSettings":{"auth":"pw"}}}]}]"#;
+        let servers = parse_subscription_content(sub);
+        assert_eq!(servers[0].tls.alpn, vec!["h3".to_string()]);
     }
 }

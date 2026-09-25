@@ -511,7 +511,18 @@ impl CoreManager {
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let mut lines = BufReader::new(reader).lines();
+                let mut reality_hint_shown = false;
                 while let Ok(Some(line)) = lines.next_line().await {
+                    // Xray logs this for every rejected connection; explain it once per core run.
+                    if !reality_hint_shown && line.contains("REALITY: received real certificate") {
+                        reality_hint_shown = true;
+                        log::warn!(
+                            "REALITY handshake rejected: the server did not recognise this client and \
+                             answered as the real SNI site. Check that pbk/sid/sni match the server \
+                             (update the subscription), that the system clock is correct, or try \
+                             another network — the ISP may be redirecting the connection."
+                        );
+                    }
                     let mut buf = logs.lock().await;
                     buf.push(line);
                     let blen = buf.len();
