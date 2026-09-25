@@ -364,7 +364,7 @@ pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, St
     let mut state = ctx.state.lock().await;
 
     // Grab traffic stats before stopping
-    let traffic = ctx.core.get_traffic_stats().await;
+    let traffic = final_traffic(&ctx.core).await;
 
     if let Err(e) = proxy_setter::unset_system_proxy() {
         log::error!("Failed to unset system proxy: {}", e);
@@ -386,6 +386,17 @@ pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, St
         socks_port: ctx.core.socks_port().await,
         http_port: ctx.core.http_port().await,
     })
+}
+
+/// Traffic counters for closing a session. Skipped when no core runs — a connect to a
+/// closed localhost port takes ~2 s on Windows — and capped so teardown never stalls.
+pub async fn final_traffic(core: &CoreManager) -> TrafficStats {
+    if !core.is_running().await {
+        return TrafficStats::default();
+    }
+    tokio::time::timeout(std::time::Duration::from_millis(500), core.get_traffic_stats())
+        .await
+        .unwrap_or_default()
 }
 
 /// Finalize the open connection record (disconnect, app exit, restart as admin).
@@ -1560,7 +1571,7 @@ pub async fn restart_as_admin(app_handle: tauri::AppHandle, ctx: State<'_, AppCo
     // ports and TUN device and makes the new instance report a connection it doesn't own.
     {
         let mut state = ctx.state.lock().await;
-        let traffic = ctx.core.get_traffic_stats().await;
+        let traffic = final_traffic(&ctx.core).await;
         if let Err(e) = proxy_setter::unset_system_proxy() {
             log::error!("Failed to unset system proxy: {}", e);
         }

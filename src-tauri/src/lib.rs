@@ -221,7 +221,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 let ctx: tauri::State<AppContext> = _app.state();
                 tauri::async_runtime::block_on(async {
-                    let traffic = ctx.core.get_traffic_stats().await;
+                    let traffic = commands::final_traffic(&ctx.core).await;
                     let _ = ctx.core.stop().await;
                     // Don't let a long-running command (e.g. a geo download) hold up the exit
                     if let Ok(mut state) = ctx.state.try_lock() {
