@@ -89,6 +89,11 @@ pub fn run() {
                 ctx.core.set_ports(saved_socks, saved_http).await;
             });
 
+            // A crashed or force-killed previous run can leave sing-box/xray running,
+            // still holding its ports, TUN device and routes.
+            #[cfg(not(target_os = "android"))]
+            app.state::<AppContext>().core.kill_orphaned_cores();
+
             // Android: poll file-based deep link written by MainActivity
             #[cfg(target_os = "android")]
             {
@@ -189,8 +194,18 @@ pub fn run() {
             commands::get_server_link,
             commands::get_xposed_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running NexVPN");
+        .build(tauri::generate_context!())
+        .expect("error while running NexVPN")
+        .run(|_app, _event| {
+            // The event loop ends with std::process::exit, so Drop (and kill_on_drop) never
+            // runs for the core. Stop it explicitly or it outlives the app.
+            #[cfg(not(target_os = "android"))]
+            if let tauri::RunEvent::Exit = _event {
+                let ctx: tauri::State<AppContext> = _app.state();
+                let _ = tauri::async_runtime::block_on(ctx.core.stop());
+                system::proxy_setter::ensure_proxy_disabled();
+            }
+        });
 
     // Also cleanup on normal exit (desktop)
     #[cfg(not(target_os = "android"))]

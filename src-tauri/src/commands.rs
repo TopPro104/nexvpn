@@ -351,6 +351,10 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
 /// Disconnect
 #[tauri::command]
 pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, String> {
+    // Lock first: a connect still in progress holds this lock and must finish before we
+    // tear down, otherwise it re-enables the system proxy for a core we just killed.
+    let mut state = ctx.state.lock().await;
+
     // Grab traffic stats before stopping
     let traffic = ctx.core.get_traffic_stats().await;
 
@@ -361,8 +365,6 @@ pub async fn disconnect(ctx: State<'_, AppContext>) -> Result<StatusResponse, St
     if let Err(e) = ctx.core.stop().await {
         log::error!("Failed to stop core: {}", e);
     }
-
-    let mut state = ctx.state.lock().await;
 
     // Finalize last open session
     let now = std::time::SystemTime::now()
@@ -424,6 +426,8 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
         _ => return Err(format!("Unknown core: {}", core)),
     };
 
+    let mut state = ctx.state.lock().await;
+
     let was_running = ctx.core.is_running().await;
     if was_running {
         ctx.core.stop().await.map_err(|e| e.to_string())?;
@@ -431,7 +435,6 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
 
     ctx.core.set_core_type(core_type.clone()).await;
 
-    let mut state = ctx.state.lock().await;
     state.selected_core = core_type.clone();
     save_state(&state);
 
@@ -445,7 +448,6 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
                 let pam = state.settings.per_app_mode.clone();
                 let pal = state.settings.per_app_list.clone();
                 let stl = state.settings.stealth_mode;
-                drop(state);
                 ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
             }
         }
@@ -755,8 +757,7 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
                     let pam = state.settings.per_app_mode.clone();
                     let pal = state.settings.per_app_list.clone();
                     let stl = state.settings.stealth_mode;
-                    drop(state);
-                    // Reconnect with new ports
+                    // Reconnect with new ports (state stays locked so connect/disconnect can't interleave)
                     if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
                         log::error!("Failed to reconnect with new ports: {}", e);
                     }
@@ -923,7 +924,6 @@ pub async fn save_routing_rules(
                 let pam = state.settings.per_app_mode.clone();
                 let pal = state.settings.per_app_list.clone();
                 let stl = state.settings.stealth_mode;
-                drop(state);
                 if let Err(e) = ctx.core.start(&s, tun_mode, &rules, &dr, &pam, &pal, stl).await {
                     log::error!("Failed to reconnect with new routing rules: {}", e);
                 }
@@ -992,8 +992,20 @@ pub fn is_admin() -> bool {
 
 /// Restart the application with elevated (admin) privileges
 #[tauri::command]
-pub fn restart_as_admin(app_handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn restart_as_admin(app_handle: tauri::AppHandle, ctx: State<'_, AppContext>) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+
+    // Tear down before the elevated instance starts: a core left running keeps its
+    // ports and TUN device and makes the new instance report a connection it doesn't own.
+    {
+        let _state = ctx.state.lock().await;
+        if let Err(e) = proxy_setter::unset_system_proxy() {
+            log::error!("Failed to unset system proxy: {}", e);
+        }
+        if let Err(e) = ctx.core.stop().await {
+            log::error!("Failed to stop core: {}", e);
+        }
+    }
 
     #[cfg(target_os = "windows")]
     {

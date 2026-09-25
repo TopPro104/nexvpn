@@ -191,6 +191,16 @@ impl CoreManager {
         #[cfg(target_os = "android")]
         let needs_xray_bridge = false;
 
+        // Anything already listening on our ports (e.g. a core orphaned by a previous run)
+        // would answer the health check below and make a failed start look connected.
+        let (socks_busy, http_busy) = tokio::join!(port_in_use(socks_port), port_in_use(http_port));
+        if socks_busy || http_busy {
+            return Err(anyhow!(
+                "127.0.0.1:{}: address already in use (another program, possibly a leftover sing-box/xray process)",
+                if socks_busy { socks_port } else { http_port }
+            ));
+        }
+
         let auth = (self.proxy_auth_user.as_str(), self.proxy_auth_pass.as_str());
         let clash_secret = self.clash_api_secret.as_str();
 
@@ -284,6 +294,7 @@ impl CoreManager {
         // Capture stdout/stderr into log buffer
         self.spawn_log_reader(child.stdout.take(), "OUT");
         self.spawn_log_reader(child.stderr.take(), "ERR");
+        self.record_pid(&child);
 
         *self.process.lock().await = Some(child);
 
@@ -295,11 +306,15 @@ impl CoreManager {
             // Check if process died on every iteration (fail fast)
             {
                 let mut proc = self.process.lock().await;
-                if let Some(ref mut child) = *proc {
-                    if let Ok(Some(status)) = child.try_wait() {
-                        *proc = None;
-                        return Err(anyhow!("Core exited with status: {}. Check the config.", status));
+                match proc.as_mut() {
+                    Some(child) => {
+                        if let Ok(Some(status)) = child.try_wait() {
+                            *proc = None;
+                            return Err(anyhow!("Core exited with status: {}. Check the config.", status));
+                        }
                     }
+                    // Stopped or reaped while starting — don't report a dead core as connected
+                    None => return Err(anyhow!("Core stopped during startup. Check the core logs.")),
                 }
             }
 
@@ -355,7 +370,46 @@ impl CoreManager {
             child.kill().await.ok();
             child.wait().await.ok();
         }
+        let _ = std::fs::remove_file(self.pid_file());
         Ok(())
+    }
+
+    // ── Orphaned core cleanup ──────────────────────────
+
+    fn pid_file(&self) -> PathBuf {
+        self.config_dir.join("core.pids")
+    }
+
+    /// Remember a spawned core's PID so the next launch can kill it if this instance
+    /// dies without calling stop() (crash, force-kill from Task Manager).
+    fn record_pid(&self, child: &Child) {
+        use std::io::Write;
+        if let Some(pid) = child.id() {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.pid_file()) {
+                let _ = writeln!(f, "{}", pid);
+            }
+        }
+    }
+
+    /// Kill cores left running by a previous instance. Only PIDs we recorded that still
+    /// belong to a sing-box/xray process are touched, so a reused PID is never killed.
+    #[cfg(not(target_os = "android"))]
+    pub fn kill_orphaned_cores(&self) {
+        let path = self.pid_file();
+        let Ok(content) = std::fs::read_to_string(&path) else { return };
+        for pid in content.lines().filter_map(|l| l.trim().parse::<u32>().ok()) {
+            if !is_core_process(pid) {
+                continue;
+            }
+            log::warn!("Killing core process left over from a previous run (PID {})", pid);
+            if !kill_process(pid) {
+                log::error!(
+                    "Cannot kill leftover core process (PID {}); it may be running as administrator. End sing-box/xray in Task Manager.",
+                    pid
+                );
+            }
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     pub async fn is_running(&self) -> bool {
@@ -456,6 +510,7 @@ impl CoreManager {
         let mut child = spawn_hidden(&bridge_bin, &["run", "-c", config_path.to_str().unwrap()])?;
         self.spawn_log_reader(child.stdout.take(), "BRIDGE-OUT");
         self.spawn_log_reader(child.stderr.take(), "BRIDGE-ERR");
+        self.record_pid(&child);
 
         // Short health check: if bridge exits within 1s, it failed (usually lack of admin rights)
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
@@ -776,6 +831,70 @@ impl CoreManager {
             ))
         }
     }
+}
+
+/// True if something already accepts connections on 127.0.0.1:port.
+/// A live listener answers in well under the timeout; the cap matters on Windows,
+/// where a refused localhost connect takes ~2s of SYN retries.
+async fn port_in_use(port: u16) -> bool {
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            tokio::net::TcpStream::connect(("127.0.0.1", port)),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
+/// Whether `pid` is a running sing-box/xray process.
+#[cfg(target_os = "windows")]
+fn is_core_process(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    // CSV row: "sing-box.exe","1234","Console","1","12,345 K"
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .map(|o| {
+            let out = String::from_utf8_lossy(&o.stdout).trim_start().to_lowercase();
+            out.starts_with("\"sing-box") || out.starts_with("\"xray")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+fn is_core_process(pid: u32) -> bool {
+    // comm= is the bare name on Linux (truncated to 15 chars) and the full path on macOS
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .map(|o| {
+            let out = String::from_utf8_lossy(&o.stdout);
+            let name = out.trim().rsplit('/').next().unwrap_or("");
+            name.starts_with("sing-box") || name.starts_with("xray")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+fn kill_process(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Spawn a process with hidden console window on Windows
