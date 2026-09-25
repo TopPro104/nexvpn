@@ -111,14 +111,12 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
         }
     }
 
-    let mut dns = json!({
+    // No independent_cache: since sing-box 1.14 the cache is always keyed per server
+    let dns = json!({
         "servers": dns_servers,
         "rules": dns_rules,
         "final": if routing.final_proxy { remote_tag } else { direct_tag }
     });
-    if tun_mode {
-        dns["independent_cache"] = json!(true);
-    }
 
     // Route rules (sniff + DNS hijack, same approach as NekoRay)
     let mut route_rules: Vec<Value> = vec![
@@ -305,8 +303,7 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str, xray_p
                 { "tag": "local", "type": "udp", "server": local_dns }
             ],
             "rules": dns_rules,
-            "final": "remote",
-            "independent_cache": true
+            "final": "remote"
         },
         "inbounds": [{
             "type": "tun",
@@ -316,8 +313,8 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str, xray_p
             "mtu": 9000,
             "auto_route": true,
             "strict_route": false,
-            "stack": "system",
-            "sniff": true
+            // Sniffing is the route rule above; the inbound "sniff" field was removed in 1.13
+            "stack": "system"
         }],
         "outbounds": [
             {

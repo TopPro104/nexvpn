@@ -10,8 +10,8 @@
 
 set -euo pipefail
 
-SINGBOX_VERSION="1.12.18"
-XRAY_VERSION="26.2.2"
+SINGBOX_VERSION="1.14.2"
+XRAY_VERSION="26.9.9"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # If running from project root (src-tauri/ sibling exists), put binaries
