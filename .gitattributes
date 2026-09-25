@@ -1,0 +1,3 @@
+# Windows scripts must have CRLF: cmd.exe misparses LF batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
