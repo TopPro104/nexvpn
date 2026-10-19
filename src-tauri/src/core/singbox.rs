@@ -46,7 +46,9 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, tun_mod
             "mtu": 9000,
             "auto_route": true,
             "strict_route": false,
-            "stack": "mixed",
+            // gvisor: the system/mixed stacks parse raw packets in sing-tun and panic on a
+            // truncated IPv6 packet from wintun (slice bounds out of range in processIPv6)
+            "stack": "gvisor",
             "udp_timeout": "5m",
             "endpoint_independent_nat": true
         }));
@@ -314,7 +316,7 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str, xray_p
             "auto_route": true,
             "strict_route": false,
             // Sniffing is the route rule above; the inbound "sniff" field was removed in 1.13
-            "stack": "system"
+            "stack": "gvisor" // see generate_config: system stack panics on short IPv6 packets
         }],
         "outbounds": [
             {
