@@ -161,6 +161,10 @@ pub struct Settings {
     pub language: String,
     #[serde(default = "default_vpn_mode")]
     pub vpn_mode: String, // "proxy" or "tun"
+    /// TUN for Xray on desktop: "bridge" (sing-box TUN in front of Xray's SOCKS) or
+    /// "native" (Xray's own tun inbound, no loopback hop)
+    #[serde(default = "default_xray_tun")]
+    pub xray_tun: String,
     #[serde(default)]
     pub auto_reconnect: bool,
     #[serde(default = "default_true")]
@@ -186,6 +190,7 @@ fn default_style() -> String { "default".to_string() }
 fn default_port_mode() -> String { "auto".to_string() }
 fn default_per_app_mode() -> String { "all".to_string() }
 fn default_vpn_mode() -> String { "proxy".to_string() }
+fn default_xray_tun() -> String { "native".to_string() }
 fn default_true() -> bool { true }
 fn default_animation() -> String { "smooth".to_string() }
 
@@ -200,6 +205,7 @@ impl Default for Settings {
             auto_connect: false,
             language: "en".to_string(),
             vpn_mode: "proxy".to_string(),
+            xray_tun: "native".to_string(),
             auto_reconnect: false,
             hwid_enabled: true,
             animation: "smooth".to_string(),

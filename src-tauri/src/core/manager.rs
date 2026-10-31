@@ -13,6 +13,9 @@ use crate::proxy::routing::{self as routing_mod, EffectiveRouting, GeoResolution
 
 use super::{geo, singbox, xray};
 
+/// Interface name of Xray's own TUN (macOS needs utunN)
+const XRAY_TUN_NAME: &str = if cfg!(target_os = "macos") { "utun225" } else { "xray_tun" };
+
 pub struct CoreManager {
     process: Arc<Mutex<Option<Child>>>,
     /// sing-box TUN bridge process, used only when core_type==Xray && tun_mode on desktop.
@@ -177,7 +180,7 @@ impl CoreManager {
     }
 
     #[allow(unused_variables)]
-    pub async fn start(&self, server: &Server, tun_mode: bool, routing_input: &RoutingInput, per_app_mode: &str, per_app_list: &[String], stealth_mode: bool) -> Result<()> {
+    pub async fn start(&self, server: &Server, tun_mode: bool, xray_native_tun: bool, routing_input: &RoutingInput, per_app_mode: &str, per_app_list: &[String], stealth_mode: bool) -> Result<()> {
         self.stop().await?;
 
         let core_type = self.core_type.lock().await.clone();
@@ -185,12 +188,15 @@ impl CoreManager {
         let http_port = *self.http_port.lock().await;
 
         // On Android: TUN is handled by VpnService + tun2socks (both cores work).
-        // On desktop: sing-box has native TUN; Xray has none — we spawn sing-box as a
-        // TUN→SOCKS bridge in front of Xray (v2rayN / nekoray pattern).
+        // On desktop: sing-box has native TUN; Xray either uses its own tun inbound or
+        // sits behind sing-box as a TUN→SOCKS bridge (v2rayN / nekoray pattern).
         #[cfg(not(target_os = "android"))]
-        let needs_xray_bridge = tun_mode && core_type == CoreType::Xray;
+        let (needs_xray_bridge, xray_tun) = {
+            let xray_tun_mode = tun_mode && core_type == CoreType::Xray;
+            (xray_tun_mode && !xray_native_tun, xray_tun_mode && xray_native_tun)
+        };
         #[cfg(target_os = "android")]
-        let needs_xray_bridge = false;
+        let (needs_xray_bridge, xray_tun) = (false, false);
 
         // Anything already listening on our ports (e.g. a core orphaned by a previous run)
         // would answer the health check below and make a failed start look connected.
@@ -216,7 +222,7 @@ impl CoreManager {
 
         let config = match core_type {
             CoreType::SingBox => singbox::generate_config(server, socks_port, http_port, tun_mode, &routing, auth, clash_secret, self.clash_api_port)?,
-            CoreType::Xray => xray::generate_config(server, socks_port, http_port, &routing, auth, self.xray_api_port)?,
+            CoreType::Xray => xray::generate_config(server, socks_port, http_port, &routing, auth, self.xray_api_port, xray_tun.then_some(XRAY_TUN_NAME))?,
         };
 
         let config_path = self.config_dir.join("running_config.json");
@@ -324,7 +330,15 @@ impl CoreManager {
                     Some(child) => {
                         if let Ok(Some(status)) = child.try_wait() {
                             *proc = None;
-                            return Err(anyhow!("Core exited with status: {}. Check the config.", status));
+                            drop(proc);
+                            // The core's own reason (e.g. Xray TUN: "Access is denied.") lets
+                            // humanize_core_error explain it; give the log reader a moment
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            let reason = self.logs.lock().await.iter().rev()
+                                .find(|l| !l.trim().is_empty())
+                                .map(|l| format!(" {}", l.trim()))
+                                .unwrap_or_default();
+                            return Err(anyhow!("Core exited with status: {}.{} Check the config.", status, reason));
                         }
                     }
                     // Stopped or reaped while starting — don't report a dead core as connected
@@ -1010,10 +1024,11 @@ mod tests {
         let auth = ("u", "p");
         write("singbox-proxy.json", &singbox::generate_config(&server, 21080, 21081, false, &routing, auth, "s", 21090).unwrap());
         write("singbox-tun.json", &singbox::generate_config(&server, 21080, 21081, true, &routing, auth, "s", 21090).unwrap());
-        write("xray.json", &xray::generate_config(&server, 21080, 21081, &routing, auth, 21091).unwrap());
+        write("xray.json", &xray::generate_config(&server, 21080, 21081, &routing, auth, 21091, None).unwrap());
+        write("xray-tun.json", &xray::generate_config(&server, 21080, 21081, &routing, auth, 21091, Some(XRAY_TUN_NAME)).unwrap());
         write("bridge.json", &singbox::generate_bridge_config(21080, &server.address, "xray", &routing));
         let no_profile = EffectiveRouting::build(&custom, "direct", None);
         write("singbox-noprofile.json", &singbox::generate_config(&server, 21080, 21081, false, &no_profile, auth, "s", 21090).unwrap());
-        write("xray-noprofile.json", &xray::generate_config(&server, 21080, 21081, &no_profile, auth, 21091).unwrap());
+        write("xray-noprofile.json", &xray::generate_config(&server, 21080, 21081, &no_profile, auth, 21091, None).unwrap());
     }
 }

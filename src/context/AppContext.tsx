@@ -72,6 +72,7 @@ const defaultSettings: Settings = {
   auto_connect: false,
   language: "en",
   vpn_mode: "proxy",
+  xray_tun: "native",
   auto_reconnect: false,
   hwid_enabled: true,
   animation: "smooth",

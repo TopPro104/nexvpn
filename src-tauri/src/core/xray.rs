@@ -5,11 +5,12 @@ use crate::proxy::models::*;
 use crate::proxy::routing::{DnsKind, DnsSpec, EffectiveRouting, Matcher, RouteAction};
 
 /// Generate a minimal Xray-core config for a single server
-pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing: &EffectiveRouting, auth: (&str, &str), api_port: u16) -> Result<Value> {
+/// `tun`: interface name for Xray's own TUN inbound (desktop "native" TUN mode).
+pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing: &EffectiveRouting, auth: (&str, &str), api_port: u16, tun: Option<&str>) -> Result<Value> {
     let outbound = build_outbound(server)?;
     let (auth_user, auth_pass) = auth;
 
-    let config = json!({
+    let mut config = json!({
         "log": {
             "loglevel": "warning"
         },
@@ -84,7 +85,74 @@ pub fn generate_config(server: &Server, socks_port: u16, http_port: u16, routing
         }
     });
 
+    if let Some(name) = tun {
+        add_tun(&mut config, server, name);
+    }
+
     Ok(config)
+}
+
+/// Xray's own TUN: routes all traffic into the interface and binds every outbound to the
+/// physical interface, so Xray's traffic never re-enters the TUN (no process exclusion or
+/// loopback SOCKS hop as with the sing-box bridge).
+fn add_tun(config: &mut Value, server: &Server, name: &str) {
+    // First: Xray starts inbounds in order and exits if one fails, so the SOCKS port the
+    // connect health check waits for only opens once the TUN is up
+    config["inbounds"].as_array_mut().unwrap().insert(0, json!({
+        "tag": "tun-in",
+        "protocol": "tun",
+        "settings": {
+            "name": name,
+            "mtu": 1500,
+            "gateway": ["172.19.0.1/30", "fdfe:dcba:9877::1/126"],
+            // Windows only: queries to this address go into the TUN and get hijacked below
+            "dns": ["172.19.0.2"],
+            "autoSystemRoutingTable": ["0.0.0.0/0", "::/0"],
+            "autoOutboundsInterface": "auto"
+        },
+        // routeOnly: route by the sniffed domain but dial the original IP, so a direct
+        // connection doesn't resolve the name again through the system resolver
+        "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "routeOnly": true
+        }
+    }));
+    config["outbounds"].as_array_mut().unwrap().push(json!({ "tag": "dns-out", "protocol": "dns" }));
+
+    let rules = config["routing"]["rules"].as_array_mut().unwrap();
+    let head = [
+        // System DNS lands in the TUN: answer it with Xray's DNS (profile split DNS)
+        json!({ "type": "field", "inboundTag": ["tun-in"], "port": "53", "outboundTag": "dns-out" }),
+        json!({ "type": "field", "ip": ["224.0.0.0/3", "ff00::/8"], "outboundTag": "block" }),
+        json!({ "type": "field", "network": "udp", "port": "135,137-139,5353", "outboundTag": "block" }),
+    ];
+    rules.splice(0..0, head);
+
+    let dns = &mut config["dns"];
+    // "localhost" asks the system resolver, which now points back into the TUN;
+    // fall back to a resolver reached through the routing instead
+    if let Some(servers) = dns["servers"].as_array_mut() {
+        for s in servers.iter_mut().filter(|s| *s == "localhost") {
+            *s = json!("1.1.1.1");
+        }
+    }
+    // The outbound resolves the server name with the system resolver, whose queries come
+    // back through the TUN to Xray's DNS. Remote DNS goes through that same proxy, so pin
+    // the server's addresses (resolved now, before the TUN is up) to avoid a deadlock.
+    if server.address.parse::<std::net::IpAddr>().is_err() {
+        use std::net::ToSocketAddrs;
+        let ips: Vec<String> = (server.address.as_str(), server.port)
+            .to_socket_addrs()
+            .map(|it| it.map(|a| a.ip().to_string()).collect())
+            .unwrap_or_default();
+        if !ips.is_empty() {
+            if !dns["hosts"].is_object() {
+                dns["hosts"] = json!({});
+            }
+            dns["hosts"][server.address.to_lowercase()] = json!(ips);
+        }
+    }
 }
 
 fn build_outbound(server: &Server) -> Result<Value> {

@@ -173,7 +173,7 @@ fn humanize_core_error(raw: &str, tun_mode: bool) -> String {
     let lower = raw.to_lowercase();
 
     // TUN without admin rights
-    if tun_mode && (lower.contains("access denied") || lower.contains("permission denied")
+    if tun_mode && (lower.contains("access denied") || lower.contains("access is denied") || lower.contains("permission denied")
         || lower.contains("requires elevated") || lower.contains("operation not permitted")
         || lower.contains("wintun") || lower.contains("administrator"))
     {
@@ -317,7 +317,7 @@ pub async fn connect(ctx: State<'_, AppContext>, server_id: String) -> Result<St
     }
 
     ctx.core
-        .start(&server, tun_mode, &routing, &per_app_mode, &per_app_list, stealth)
+        .start(&server, tun_mode, state.settings.xray_tun == "native", &routing, &per_app_mode, &per_app_list, stealth)
         .await
         .map_err(|e| humanize_core_error(&e.to_string(), tun_mode))?;
 
@@ -471,7 +471,7 @@ pub async fn set_core_type(ctx: State<'_, AppContext>, core: String) -> Result<S
                 let pam = state.settings.per_app_mode.clone();
                 let pal = state.settings.per_app_list.clone();
                 let stl = state.settings.stealth_mode;
-                ctx.core.start(&s, tun_mode, &routing, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
+                ctx.core.start(&s, tun_mode, state.settings.xray_tun == "native", &routing, &pam, &pal, stl).await.map_err(|e| e.to_string())?;
             }
         }
     }
@@ -790,7 +790,7 @@ pub async fn save_settings(ctx: State<'_, AppContext>, settings: Settings) -> Re
                     let pal = state.settings.per_app_list.clone();
                     let stl = state.settings.stealth_mode;
                     // Reconnect with new ports (state stays locked so connect/disconnect can't interleave)
-                    if let Err(e) = ctx.core.start(&s, tun_mode, &routing, &pam, &pal, stl).await {
+                    if let Err(e) = ctx.core.start(&s, tun_mode, state.settings.xray_tun == "native", &routing, &pam, &pal, stl).await {
                         log::error!("Failed to reconnect with new ports: {}", e);
                     }
                     // Update system proxy with current HTTP port (only in proxy mode)
@@ -984,7 +984,7 @@ async fn reconnect_if_running(ctx: &AppContext, state: &AppState) {
     };
     let tun_mode = state.settings.vpn_mode == "tun";
     let s = &state.settings;
-    if let Err(e) = ctx.core.start(&server, tun_mode, &routing_input(state), &s.per_app_mode, &s.per_app_list, s.stealth_mode).await {
+    if let Err(e) = ctx.core.start(&server, tun_mode, s.xray_tun == "native", &routing_input(state), &s.per_app_mode, &s.per_app_list, s.stealth_mode).await {
         log::error!("Failed to reconnect with new routing: {}", e);
     }
 }

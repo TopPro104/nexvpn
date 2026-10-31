@@ -54,6 +54,7 @@ export interface Settings {
   auto_connect: boolean;
   language: string;
   vpn_mode: string; // "proxy" | "tun"
+  xray_tun: string; // "bridge" | "native"
   auto_reconnect: boolean;
   hwid_enabled: boolean;
   animation: string; // "none" | "smooth" | "energetic"

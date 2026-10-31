@@ -228,6 +228,36 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {state.coreType === "Xray" && state.settings.vpn_mode === "tun" &&
+        deviceInfo?.platform?.toLowerCase() !== "android" && (
+        <div className="settings-section">
+          <div className="settings-label">{t("settings.xrayTun")}</div>
+          <div className="core-radio-group">
+            <label className={`core-radio ${state.settings.xray_tun !== "bridge" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="xrayTun"
+                checked={state.settings.xray_tun !== "bridge"}
+                onChange={() => update("xray_tun", "native")}
+              />
+              <span>{t("settings.xrayTun.native")}</span>
+            </label>
+            <label className={`core-radio ${state.settings.xray_tun === "bridge" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="xrayTun"
+                checked={state.settings.xray_tun === "bridge"}
+                onChange={() => update("xray_tun", "bridge")}
+              />
+              <span>{t("settings.xrayTun.bridge")}</span>
+            </label>
+          </div>
+          <div className="hwid-desc">
+            {t(state.settings.xray_tun === "bridge" ? "settings.xrayTun.bridgeDesc" : "settings.xrayTun.nativeDesc")}
+          </div>
+        </div>
+      )}
+
       <div className="settings-section">
         <div className="settings-label">{t("settings.ports")}</div>
         <div className="core-radio-group" style={{ marginBottom: 8 }}>
