@@ -317,6 +317,7 @@ export const api = {
   completeOnboarding: () => invoke<void>("complete_onboarding"),
 
   isAdmin: () => invoke<boolean>("is_admin"),
+  detectDpiBypass: () => invoke<string[]>("detect_dpi_bypass"),
 
   restartAsAdmin: () => invoke<void>("restart_as_admin"),
 

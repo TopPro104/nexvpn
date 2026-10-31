@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use crate::core::{geo, manager::CoreManager};
 use crate::proxy::routing::{self, EffectiveRouting, HappDirective, RoutingInput};
 use crate::proxy::{link_parser, models::*, subscription};
-use crate::system::{hwid, proxy_setter};
+use crate::system::{dpi_bypass, hwid, proxy_setter};
 use crate::testing::ping;
 
 /// Shared app state managed by Tauri
@@ -1520,6 +1520,12 @@ pub async fn complete_onboarding(ctx: State<'_, AppContext>) -> Result<(), Strin
     state.onboarding_completed = true;
     save_state(&state);
     Ok(())
+}
+
+/// Running DPI-bypass tools (zapret, GoodbyeDPI) that interfere with the VPN
+#[tauri::command]
+pub async fn detect_dpi_bypass() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(dpi_bypass::detect).await.unwrap_or_default()
 }
 
 /// Check if the process is running with elevated (admin) privileges

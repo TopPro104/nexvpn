@@ -7,6 +7,7 @@ import { TrafficPanel } from "./components/home/TrafficPanel";
 import { ServerList } from "./components/home/ServerList";
 import { QuickConnect } from "./components/home/QuickConnect";
 import { AnnounceBanner } from "./components/home/AnnounceBanner";
+import { DpiBypassBanner } from "./components/home/DpiBypassBanner";
 import { SubList } from "./components/subscriptions/SubList";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { LogsPage } from "./components/logs/LogsPage";
@@ -319,6 +320,7 @@ function AppContent() {
           <div className={`home-page ${state.connected ? "vpn-active" : ""}`}>
             <div className="home-left">
               <StatusPanel />
+              <DpiBypassBanner />
               <AnnounceBanner activeTab={state.serverListUI.tab} />
               <TrafficPanel />
               <QuickConnect />

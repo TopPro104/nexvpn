@@ -1144,6 +1144,18 @@ body {
   min-width: 0;
   overflow-wrap: break-word;
 }
+.dpi-banner {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--warning) 10%, var(--card-bg));
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  white-space: normal;
+}
+.dpi-banner .announce-banner-icon {
+  color: var(--warning);
+}
+.dpi-banner-dismiss {
+  flex-shrink: 0;
+}
 .announce-banner-source {
   font-size: 11px;
   color: var(--text-muted);

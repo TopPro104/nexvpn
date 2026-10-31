@@ -196,6 +196,7 @@ pub fn run() {
             commands::get_onboarding_completed,
             commands::complete_onboarding,
             commands::is_admin,
+            commands::detect_dpi_bypass,
             commands::restart_as_admin,
             commands::check_ip,
             commands::check_dns_leak,
