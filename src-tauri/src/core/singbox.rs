@@ -301,7 +301,9 @@ pub fn generate_bridge_config(xray_socks_port: u16, server_address: &str, xray_p
         "log": { "level": "error", "timestamp": true },
         "dns": {
             "servers": [
-                { "tag": "remote", "type": "tcp", "server": "8.8.8.8", "detour": "to-xray" },
+                // DoH keeps one connection to Xray open; plain TCP DNS dials 127.0.0.1 per
+                // query, and a dropped loopback SYN on Windows fails it after 1 s
+                { "tag": "remote", "type": "https", "server": "8.8.8.8", "detour": "to-xray" },
                 { "tag": "local", "type": "udp", "server": local_dns }
             ],
             "rules": dns_rules,
